@@ -1,10 +1,10 @@
-import json
 import os
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score
 
 
 def load_market_data() -> pd.DataFrame:
@@ -33,14 +33,26 @@ def load_market_data() -> pd.DataFrame:
     df["sma_ratio"] = df["Close"] / df["Close"].rolling(20).mean() - 1.0
     df["hl_spread"] = (df["High"] - df["Low"]) / df["Close"]
 
-    # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
+    # Lagged returns
+    for lag in [1, 2, 3]:
+        df[f"ret_1d_lag{lag}"] = df["ret_1d"].shift(lag)
+        df[f"ret_5d_lag{lag}"] = df["ret_5d"].shift(lag)
+        df[f"ret_20d_lag{lag}"] = df["ret_20d"].shift(lag)
+
+    # Multi‑scale volatility features
+    df["vol_5d"] = df["ret_1d"].rolling(5).std()
+    df["vol_20d"] = df["ret_1d"].rolling(20).std()
+
+    # Target: 5‑day forward swing direction
     df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
+
     return df.dropna().reset_index(drop=True)
 
 
 def run_experiment():
     df = load_market_data()
-    feature_cols = [
+
+    base_features = [
         "ret_1d",
         "ret_5d",
         "ret_20d",
@@ -48,33 +60,44 @@ def run_experiment():
         "sma_ratio",
         "hl_spread",
     ]
+
+    lag_features = [
+        f"ret_1d_lag{lag}" for lag in [1, 2, 3]
+    ] + [
+        f"ret_5d_lag{lag}" for lag in [1, 2, 3]
+    ] + [
+        f"ret_20d_lag{lag}" for lag in [1, 2, 3]
+    ]
+
+    vol_features = ["vol_5d", "vol_20d"]
+
+    feature_cols = base_features + lag_features + vol_features
+
     X = df[feature_cols]
     y = df["target"]
 
-    # Strict chronological train/validation split (80% past, 20% future)
     split_idx = int(len(df) * 0.8)
     X_train, X_val = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_val = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=200, max_depth=4, random_state=42
+    )
     model.fit(X_train, y_train)
 
     preds = model.predict(X_val)
     acc = accuracy_score(y_val, preds)
-    f1 = f1_score(y_val, preds)
 
     os.makedirs("outputs", exist_ok=True)
 
     plt.figure(figsize=(6, 4))
-    plt.bar(
-        ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
-    )
+    plt.bar(["Val Accuracy"], [acc], color="#1f77b4")
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample 5-Day Swing Direction Metrics")
+    plt.title("Out‑of‑Sample 5‑Day Swing Direction Accuracy")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
-    results = {"val_accuracy": round(acc, 4), "val_f1": round(f1, 4)}
+    results = {"val_accuracy": round(acc, 4)}
     with open("outputs/metrics.json", "w") as f:
         json.dump(results, f)
 
