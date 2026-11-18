@@ -1,0 +1,10 @@
+streamlit
+groq
+PyGithub
+google-api-python-client
+google-auth
+pydantic
+numpy
+pandas
+scikit-learn
+matplotlib
