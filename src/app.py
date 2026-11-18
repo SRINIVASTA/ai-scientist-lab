@@ -1,4 +1,5 @@
 from datetime import datetime
+import difflib
 import os
 import streamlit as st
 
@@ -28,6 +29,17 @@ def is_dummy(val: str) -> bool:
         or "..." in v
         or v in {"gsk_your_groq_api_key_here", "ghp_your_github_pat_here"}
     )
+
+
+def generate_unified_diff(old_code: str, new_code: str) -> str:
+    diff = difflib.unified_diff(
+        old_code.splitlines(),
+        new_code.splitlines(),
+        fromfile="baseline_experiment.py",
+        tofile="candidate_experiment.py",
+        lineterm="",
+    )
+    return "\n".join(diff) or "# No code changes detected"
 
 
 # 1. Detect Live vs. Dummy Secrets
@@ -72,7 +84,6 @@ if "gdrive" in st.secrets and not is_dummy(
         except Exception:
             drive = None
 
-# Sidebar Status Banner
 with st.sidebar:
     st.header("🔌 Service Connections")
     st.markdown(
@@ -135,9 +146,9 @@ with tab_run:
                 else:
                     st.write("2️⃣ [Demo Mode] Generating sample hypothesis...")
                     hyp = HypothesisOutput(
-                        title="Gradient Boosting Ensemble with Tuned Depth",
-                        rationale="Replacing shallow RandomForest (max_depth=5) with GradientBoostingClassifier captures higher-order feature interactions.",
-                        proposed_changes="Use GradientBoostingClassifier(n_estimators=120, learning_rate=0.08, max_depth=4, random_state=42).",
+                        title="Gradient Boosting with Regime Volatility Features",
+                        rationale="Replacing shallow RandomForest with GradientBoostingClassifier better captures nonlinear return-volatility interactions.",
+                        proposed_changes="Use GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, random_state=42).",
                     )
                     st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
 
@@ -146,8 +157,8 @@ with tab_run:
                         "from sklearn.ensemble import RandomForestClassifier",
                         "from sklearn.ensemble import GradientBoostingClassifier",
                     ).replace(
-                        "RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42)",
-                        "GradientBoostingClassifier(n_estimators=120, learning_rate=0.08, max_depth=4, random_state=42)",
+                        "RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)",
+                        "GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, random_state=42)",
                     )
 
                 os.makedirs("outputs", exist_ok=True)
@@ -177,11 +188,17 @@ with tab_run:
                     else:
                         improved = new_metrics.get(
                             "val_accuracy", 0
-                        ) > base_metrics.get("val_accuracy", 0)
+                        ) >= base_metrics.get("val_accuracy", 0)
                         critic = CriticOutput(
                             approved=improved,
-                            feedback="[Demo Mode] Validation accuracy improved cleanly without data leakage.",
+                            feedback="[Demo Mode] Out-of-sample directional accuracy held/improved with strict chronological split.",
                         )
+
+                    st.session_state["latest_diff"] = generate_unified_diff(
+                        baseline_code, candidate_code
+                    )
+                    st.session_state["base_metrics"] = base_metrics
+                    st.session_state["new_metrics"] = new_metrics
 
                     if critic.approved:
                         st.success(f"Approved by Critic: {critic.feedback}")
@@ -191,7 +208,7 @@ with tab_run:
                             )
                         else:
                             paper_md = (
-                                f"---\ntitle: \"{hyp.title}\"\ndate: {datetime.utcnow().strftime('%Y-%m-%d')}\ntags: [ai-scientist, automl]\n---\n\n"
+                                f"---\ntitle: \"{hyp.title}\"\ndate: {datetime.utcnow().strftime('%Y-%m-%d')}\ntags: [ai-scientist, quant-ml]\n---\n\n"
                                 f"## Abstract\nAutonomous experiment testing **{hyp.title}**.\n\n"
                                 f"## Empirical Results\n- **Baseline:** `{base_metrics}`\n- **Candidate:** `{new_metrics}`\n\n"
                                 f"## Conclusion\n{critic.feedback}"
@@ -227,7 +244,7 @@ with tab_run:
                             )
                         else:
                             st.info(
-                                f"🟡 **[Demo Mode]** Skipped GitHub PR creation for branch `{branch}` (add a real GitHub token to enable live PRs)."
+                                f"🟡 **[Demo Mode]** Skipped GitHub PR creation for branch `{branch}`."
                             )
 
                         st.session_state["latest_paper"] = paper_md
@@ -241,21 +258,37 @@ with tab_run:
                             label="Hypothesis Rejected", state="complete"
                         )
 
-        if "latest_paper" in st.session_state:
-            st.divider()
-            st.subheader("📄 Generated Research Paper")
-            st.markdown(st.session_state["latest_paper"])
-            if st.button("🌐 Publish Report to srinivasta.github.io"):
-                if gh_live:
-                    live_url = gh_mgr.publish_to_portfolio(
-                        st.session_state["latest_slug"],
-                        st.session_state["latest_paper"],
-                    )
-                    st.success(f"Published live to portfolio: {live_url}")
-                else:
-                    st.warning(
-                        "🟡 **[Demo Mode]** Add a real GitHub PAT in Secrets to publish directly to `srinivasta.github.io`."
-                    )
+    # Visual Diff & Diagnostic Plot Section
+    if "latest_diff" in st.session_state:
+        st.divider()
+        vis_col1, vis_col2 = st.columns([3, 2])
+        with vis_col1:
+            st.subheader("🔍 Candidate Code Diff")
+            st.code(st.session_state["latest_diff"], language="diff")
+        with vis_col2:
+            st.subheader("📊 Validation Metrics Plot")
+            if os.path.exists("outputs/metrics_plot.png"):
+                st.image(
+                    "outputs/metrics_plot.png",
+                    caption=f"Baseline: {st.session_state['base_metrics']} -> Candidate: {st.session_state['new_metrics']}",
+                    use_container_width=True,
+                )
+
+    if "latest_paper" in st.session_state:
+        st.divider()
+        st.subheader("📄 Generated Research Paper")
+        st.markdown(st.session_state["latest_paper"])
+        if st.button("🌐 Publish Report to srinivasta.github.io"):
+            if gh_live:
+                live_url = gh_mgr.publish_to_portfolio(
+                    st.session_state["latest_slug"],
+                    st.session_state["latest_paper"],
+                )
+                st.success(f"Published live to portfolio: {live_url}")
+            else:
+                st.warning(
+                    "🟡 **[Demo Mode]** Add a real GitHub PAT in Secrets to publish directly to `srinivasta.github.io`."
+                )
 
 with tab_drive:
     st.subheader("Google Drive Experiment Archive")
