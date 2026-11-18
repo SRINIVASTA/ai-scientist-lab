@@ -98,7 +98,6 @@ with st.sidebar:
     st.info(
         "Replace dummy values in **Manage app -> Settings -> Secrets** whenever you are ready to go live."
     )
-
 # 2. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
@@ -172,9 +171,23 @@ with tab_run:
                 )
                 cand_res = execute_experiment(cand_path)
 
+                # Self-healing auto-debug loop (up to 2 retries if live Groq is active)
+                retry_count = 0
+                while not cand_res["success"] and groq_live and retry_count < 2:
+                    retry_count += 1
+                    st.warning(
+                        f"⚠️ Runtime error detected. Groq Engineer auto-fixing (Attempt {retry_count}/2)..."
+                    )
+                    candidate_code = groq_agent.fix_code(
+                        candidate_code, cand_res["error"]
+                    )
+                    with open(cand_path, "w") as f:
+                        f.write(candidate_code)
+                    cand_res = execute_experiment(cand_path)
                 if not cand_res["success"]:
                     st.session_state.pop("latest_paper", None)
                     st.session_state.pop("latest_slug", None)
+                    st.session_state.pop("latest_diff", None)
                     st.error(
                         f"Sandbox Execution Failed:\n{cand_res['error']}"
                     )
