@@ -1,0 +1,78 @@
+import os
+import re
+from fpdf import FPDF
+
+
+def generate_research_pdf(
+    markdown_text: str, plot_path: str = "outputs/metrics_plot.png"
+) -> bytes:
+    """Converts the Markdown research paper and diagnostic chart into a clean PDF."""
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Header Banner
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(20, 45, 90)
+    pdf.cell(
+        0, 10, "Autonomous AI Scientist Lab | Research Report", ln=True
+    )
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
+
+    # Strip YAML frontmatter block for cleaner PDF reading
+    clean_md = re.sub(r"^---[\s\(\S\)]*?---\s*", "", markdown_text.strip())
+
+    # Replace Unicode characters unsupported by core Latin-1 Helvetica
+    replacements = {
+        "\u2011": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u202f": " ",
+        "\u2248": "~",
+        "\u2192": "->",
+    }
+    for old_ch, new_ch in replacements.items():
+        clean_md = clean_md.replace(old_ch, new_ch)
+    clean_md = clean_md.encode("latin-1", "replace").decode("latin-1")
+
+    for line in clean_md.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            pdf.ln(3)
+            continue
+        if stripped.startswith("# "):
+            pdf.set_font("Helvetica", "B", 15)
+            pdf.set_text_color(15, 35, 75)
+            pdf.multi_cell(0, 8, stripped[2:].replace("**", ""))
+            pdf.ln(2)
+        elif stripped.startswith("## "):
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.set_text_color(25, 65, 120)
+            pdf.multi_cell(0, 7, stripped[3:].replace("**", ""))
+            pdf.ln(1)
+        elif stripped.startswith("### "):
+            pdf.set_font("Helvetica", "B", 11)
+            pdf.set_text_color(40, 40, 40)
+            pdf.multi_cell(0, 6, stripped[4:].replace("**", ""))
+        elif stripped.startswith("```"):
+            continue
+        else:
+            pdf.set_font("Helvetica", "", 10)
+            pdf.set_text_color(30, 30, 30)
+            pdf.multi_cell(0, 5.5, stripped.replace("**", ""))
+
+    # Embed Validation Metrics Chart if available
+    if os.path.exists(plot_path):
+        pdf.ln(5)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(25, 65, 120)
+        pdf.cell(0, 8, "Validation Metrics Diagnostic Plot", ln=True)
+        pdf.image(plot_path, w=130)
+
+    return bytes(pdf.output())
