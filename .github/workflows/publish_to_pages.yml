@@ -1,0 +1,37 @@
+name: Publish Approved Paper to Portfolio
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'reports/*.md'
+
+jobs:
+  deploy-to-pages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ai-scientist-lab
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Push new report to srinivasta.github.io
+        env:
+          GH_PAT: ${{ secrets.PAGES_DEPLOY_TOKEN }}
+        run: |
+          CHANGED_FILE=$(git diff --name-only HEAD~1 HEAD -- 'reports/*.md' | head -n 1)
+          if [ -z "$CHANGED_FILE" ]; then exit 0; fi
+
+          git clone https://x-access-token:${GH_PAT}@://github.com pages_repo
+          mkdir -p pages_repo/_posts
+          DATE_PREFIX=$(date -u +"%Y-%m-%d")
+          BASENAME=$(basename "$CHANGED_FILE")
+          cp "$CHANGED_FILE" "pages_repo/_posts/${DATE_PREFIX}-${BASENAME}"
+
+          cd pages_repo
+          git config user.name "AI Scientist Bot"
+          git config user.email "bot@srinivasta.github.io"
+          git add .
+          git commit -m "docs: publish autonomous research report ${BASENAME}"
+          git push origin main
