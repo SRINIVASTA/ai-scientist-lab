@@ -436,9 +436,10 @@ with tab_run:
                     )
 
     # Dynamic Horizon Price Range & Signal Forecast Card
+    forecast = None
+    active_sym = st.session_state.get("active_ticker", "^NSEI")
     if os.path.exists("data/market_data.csv"):
         st.divider()
-        active_sym = st.session_state.get("active_ticker", "^NSEI")
         day_label = f"{horizon_days}-Trading-Day"
         st.subheader(f"🎯 Live {day_label} Market Forecast ({active_sym})")
         forecast = compute_live_forecast(
@@ -492,7 +493,11 @@ with tab_run:
         slug = st.session_state.get("latest_slug", "experiment")
 
         with dl_col1:
-            pdf_bytes = generate_research_pdf(st.session_state["latest_paper"])
+            pdf_bytes = generate_research_pdf(
+                st.session_state["latest_paper"],
+                forecast=forecast,
+                ticker=active_sym,
+            )
             st.download_button(
                 label="📕 Download Report (.pdf)",
                 data=pdf_bytes,
