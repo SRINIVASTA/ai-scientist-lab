@@ -97,7 +97,8 @@ def compute_live_5d_forecast(csv_path: str = "data/market_data.csv"):
     model = RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42)
     model.fit(train_df[feature_cols], train_df["target"])
 
-    prob_up = float(model.predict_proba(latest_row))
+    probs = model.predict_proba(latest_row).ravel()
+    prob_up = float(probs) if len(probs) > 1 else float(probs)
     direction = "BULLISH (UP)" if prob_up >= 0.5 else "BEARISH (DOWN)"
     confidence = prob_up if prob_up >= 0.5 else (1.0 - prob_up)
 
