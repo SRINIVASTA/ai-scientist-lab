@@ -1,0 +1,44 @@
+name: Run Sandboxed Experiment
+
+on:
+  pull_request:
+    paths:
+      - 'baselines/baseline_experiment.py'
+  workflow_dispatch:
+
+jobs:
+  verify-and-archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Execute AST Check & Sandbox Runner
+        run: |
+          python -c "
+          from src.sandbox_runner import execute_experiment
+          res = execute_experiment('baselines/baseline_experiment.py')
+          assert res['success'], f'Experiment failed: {res[\"error\"]}'
+          print('Verified Metrics:', res['metrics'])
+          "
+
+      - name: Upload Artifacts to Google Drive
+        env:
+          GDRIVE_SA_JSON: ${{ secrets.GDRIVE_SA_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+        run: |
+          python -c "
+          import os
+          from src.gdrive_store import GDriveStore
+          store = GDriveStore(os.environ['GDRIVE_SA_JSON'], os.environ['GDRIVE_FOLDER_ID'])
+          store.upload_file('outputs/metrics.json', 'application/json')
+          store.upload_file('outputs/metrics_plot.png', 'image/png')
+          "
