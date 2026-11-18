@@ -1,6 +1,15 @@
 import json
+from typing import Any
 from groq import Groq, NotFoundError
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+
+def _coerce_to_str(v: Any) -> str:
+    if isinstance(v, list):
+        return "\n".join(str(item) for item in v)
+    if isinstance(v, dict):
+        return json.dumps(v, indent=2)
+    return str(v)
 
 
 class HypothesisOutput(BaseModel):
@@ -8,10 +17,20 @@ class HypothesisOutput(BaseModel):
     rationale: str
     proposed_changes: str
 
+    @field_validator("title", "rationale", "proposed_changes", mode="before")
+    @classmethod
+    def ensure_string(cls, v: Any) -> str:
+        return _coerce_to_str(v)
+
 
 class CriticOutput(BaseModel):
     approved: bool
     feedback: str
+
+    @field_validator("feedback", mode="before")
+    @classmethod
+    def ensure_string(cls, v: Any) -> str:
+        return _coerce_to_str(v)
 
 
 class AIScientistPipeline:
@@ -54,7 +73,7 @@ class AIScientistPipeline:
         sys_prompt = (
             "You are a Principal AI Researcher. Analyze the baseline Python ML script and past results. "
             "Propose ONE concrete, high-impact algorithmic or feature engineering hypothesis to improve val_accuracy. "
-            "Respond strictly in JSON matching keys: 'title', 'rationale', 'proposed_changes'."
+            "Respond strictly in JSON matching keys: 'title' (string), 'rationale' (string), 'proposed_changes' (string)."
         )
         raw = self._chat(
             sys_prompt,
@@ -68,7 +87,7 @@ class AIScientistPipeline:
     ) -> str:
         sys_prompt = (
             "You are an expert ML Engineer using Python 3.11+ and Pandas 2.2+. Modify the baseline script to implement the hypothesis. "
-            "Rules: 1) Keep dataset generation and random_state=42 identical (you may add engineered columns after price/ret_1d). "
+            "Rules: 1) Keep dataset loading and random_state=42 identical (you may add engineered columns after loading df). "
             "2) Must save 'outputs/metrics.json' with 'val_accuracy' and 'outputs/metrics_plot.png'. "
             "3) Only import os (for os.makedirs), json, matplotlib, numpy, pandas, sklearn. "
             "4) NEVER use deprecated Pandas methods like .replace(..., method='bfill') or .fillna(method=...) — use .replace(0, np.nan).bfill() instead. "
