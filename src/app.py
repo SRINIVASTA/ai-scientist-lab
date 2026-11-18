@@ -10,6 +10,7 @@ import yfinance as yf
 from gdrive_store import GDriveStore
 from github_sync import GitHubManager
 from groq_agents import AIScientistPipeline, CriticOutput, HypothesisOutput
+from pdf_report import generate_research_pdf
 from sandbox_runner import execute_experiment
 
 st.set_page_config(
