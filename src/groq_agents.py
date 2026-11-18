@@ -67,16 +67,32 @@ class AIScientistPipeline:
         self, baseline_code: str, hypothesis: HypothesisOutput
     ) -> str:
         sys_prompt = (
-            "You are an expert ML Engineer. Modify the baseline script to implement the hypothesis. "
-            "Rules: 1) Keep dataset generation and random_state=42 identical. "
+            "You are an expert ML Engineer using Python 3.11+ and Pandas 2.2+. Modify the baseline script to implement the hypothesis. "
+            "Rules: 1) Keep dataset generation and random_state=42 identical (you may add engineered columns after price/ret_1d). "
             "2) Must save 'outputs/metrics.json' with 'val_accuracy' and 'outputs/metrics_plot.png'. "
             "3) Only import os (for os.makedirs), json, matplotlib, numpy, pandas, sklearn. "
-            "4) Return ONLY raw valid Python code without markdown fences."
+            "4) NEVER use deprecated Pandas methods like .replace(..., method='bfill') or .fillna(method=...) — use .replace(0, np.nan).bfill() instead. "
+            "5) Return ONLY raw valid Python code without markdown fences."
         )
         user_msg = (
             f"Baseline:\n{baseline_code}\n\n"
             f"Hypothesis: {hypothesis.title}\n"
             f"Changes: {hypothesis.proposed_changes}"
+        )
+        code = self._chat(sys_prompt, user_msg)
+        return code.replace("```python", "").replace("```", "").strip()
+
+    def fix_code(self, broken_code: str, error_traceback: str) -> str:
+        sys_prompt = (
+            "You are a Senior Python ML Debugger. Fix the runtime error in the provided candidate experiment script. "
+            "Keep the exact experimental goal, dataset seed=42, and output paths ('outputs/metrics.json' and 'outputs/metrics_plot.png'). "
+            "Only import os (for os.makedirs), json, matplotlib, numpy, pandas, sklearn. "
+            "NEVER use deprecated Pandas methods like .replace(..., method='bfill') or .fillna(method=...). "
+            "Return ONLY the complete, fixed raw Python code without markdown fences."
+        )
+        user_msg = (
+            f"Broken Code:\n{broken_code}\n\n"
+            f"Error Traceback:\n{error_traceback}"
         )
         code = self._chat(sys_prompt, user_msg)
         return code.replace("```python", "").replace("```", "").strip()
