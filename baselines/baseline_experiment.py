@@ -1,5 +1,5 @@
-import json
 import os
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -50,9 +50,18 @@ def load_market_data() -> pd.DataFrame:
         df["log_ret"], window=20, bins=8
     )
 
-    # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
+    # Target: 5‑day forward swing direction
     df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
-    return df.dropna().reset_index(drop=True)
+
+    # Lagged features
+    df["ret_1d_lag1"] = df["ret_1d"].shift(1)
+    df["ret_1d_lag2"] = df["ret_1d"].shift(2)
+    df["shannon_entropy_lag1"] = df["shannon_entropy_20d"].shift(1)
+    df["shannon_entropy_lag2"] = df["shannon_entropy_20d"].shift(2)
+
+    # Drop rows with any NaN introduced by rolling / lagging
+    df = df.dropna().reset_index(drop=True)
+    return df
 
 
 def run_experiment():
@@ -65,34 +74,37 @@ def run_experiment():
         "sma_ratio",
         "hl_spread",
         "shannon_entropy_20d",
+        "ret_1d_lag1",
+        "ret_1d_lag2",
+        "shannon_entropy_lag1",
+        "shannon_entropy_lag2",
     ]
     X = df[feature_cols]
     y = df["target"]
 
-    # Strict chronological train/validation split (80% past, 20% future)
+    # Chronological 80/20 split
     split_idx = int(len(df) * 0.8)
     X_train, X_val = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_val = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=200, max_depth=6, random_state=42, n_jobs=-1
+    )
     model.fit(X_train, y_train)
 
     preds = model.predict(X_val)
     acc = accuracy_score(y_val, preds)
-    f1 = f1_score(y_val, preds)
 
     os.makedirs("outputs", exist_ok=True)
 
     plt.figure(figsize=(6, 4))
-    plt.bar(
-        ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
-    )
+    plt.bar(["5D Trend Acc"], [acc], color="#1f77b4")
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample 5-Day Swing Metrics (With Shannon Entropy)")
+    plt.title("Out‑of‑Sample 5‑Day Swing Accuracy")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
-    results = {"val_accuracy": round(acc, 4), "val_f1": round(f1, 4)}
+    results = {"val_accuracy": round(acc, 4)}
     with open("outputs/metrics.json", "w") as f:
         json.dump(results, f)
 
