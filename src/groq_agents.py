@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 from typing import Any
 from groq import Groq, NotFoundError
@@ -59,7 +60,7 @@ class AIScientistPipeline:
                 if json_mode:
                     kwargs["response_format"] = {"type": "json_object"}
                 resp = self.client.chat.completions.create(**kwargs)
-                return resp.choices[0].message.content
+                return resp.choices.message.content
             except NotFoundError as e:
                 last_err = e
                 continue
