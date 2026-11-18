@@ -24,6 +24,20 @@ def _sanitize_latin1(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+def _break_long_tokens(text: str, max_len: int = 65) -> str:
+    """Splits only ultra-long unbroken tokens (like URLs) while keeping normal words intact."""
+    words = text.split(" ")
+    safe_words = []
+    for w in words:
+        if len(w) > max_len:
+            safe_words.extend(
+                [w[i : i + max_len] for i in range(0, len(w), max_len)]
+            )
+        else:
+            safe_words.append(w)
+    return " ".join(safe_words)
+
+
 def _render_forecast_box(pdf: FPDF, forecast: dict, ticker: str) -> None:
     """Renders the Live Market Forecast metrics as a clean 4-column summary table."""
     h_days = forecast.get("horizon_days", 5)
@@ -74,6 +88,7 @@ def _render_forecast_box(pdf: FPDF, forecast: dict, ticker: str) -> None:
             for cell_text in row_data:
                 row.cell(_sanitize_latin1(cell_text))
 
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "I", 8)
     pdf.set_text_color(100, 100, 100)
     pdf.multi_cell(
@@ -82,6 +97,7 @@ def _render_forecast_box(pdf: FPDF, forecast: dict, ticker: str) -> None:
         _sanitize_latin1(
             f"Note: Range reflects a +/-1 sigma {h_days}-trading-day volatility envelope derived from historical returns. For research purposes only."
         ),
+        wrapmode="WORD",
     )
     pdf.ln(4)
 
@@ -162,15 +178,15 @@ def generate_research_pdf(
         banner_text += f"  ({paper_date})"
     pdf.cell(0, 6, banner_text, ln=True)
 
+    pdf.set_x(pdf.l_margin)
     pdf.set_font("Helvetica", "B", 15)
     pdf.set_text_color(20, 45, 90)
-    pdf.multi_cell(pdf.epw, 8, paper_title, wrapmode="CHAR")
+    pdf.multi_cell(pdf.epw, 8, _break_long_tokens(paper_title), wrapmode="WORD")
 
     pdf.set_draw_color(200, 200, 200)
     pdf.line(pdf.l_margin, pdf.get_y() + 2, pdf.w - pdf.r_margin, pdf.get_y() + 2)
     pdf.ln(6)
 
-    # Render Live Market Forecast Table if available
     if forecast:
         _render_forecast_box(pdf, forecast, ticker)
 
@@ -202,27 +218,27 @@ def generate_research_pdf(
         if stripped.startswith("```"):
             continue
 
-        clean_line = stripped.replace("**", "")
+        clean_line = _break_long_tokens(stripped.replace("**", ""))
 
         if stripped.startswith("# "):
             pdf.set_font("Helvetica", "B", 14)
             pdf.set_text_color(15, 35, 75)
-            pdf.multi_cell(pdf.epw, 8, clean_line[2:], wrapmode="CHAR")
+            pdf.multi_cell(pdf.epw, 8, clean_line[2:], wrapmode="WORD")
             pdf.ln(2)
         elif stripped.startswith("## "):
             pdf.ln(2)
             pdf.set_font("Helvetica", "B", 12)
             pdf.set_text_color(25, 65, 120)
-            pdf.multi_cell(pdf.epw, 7, clean_line[3:], wrapmode="CHAR")
+            pdf.multi_cell(pdf.epw, 7, clean_line[3:], wrapmode="WORD")
             pdf.ln(1)
         elif stripped.startswith("### "):
             pdf.set_font("Helvetica", "B", 11)
             pdf.set_text_color(40, 40, 40)
-            pdf.multi_cell(pdf.epw, 6, clean_line[4:], wrapmode="CHAR")
+            pdf.multi_cell(pdf.epw, 6, clean_line[4:], wrapmode="WORD")
         else:
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(30, 30, 30)
-            pdf.multi_cell(pdf.epw, 5.5, clean_line, wrapmode="CHAR")
+            pdf.multi_cell(pdf.epw, 5.5, clean_line, wrapmode="WORD")
 
     if table_buffer:
         _render_markdown_table(pdf, table_buffer)
