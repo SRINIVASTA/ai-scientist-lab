@@ -18,11 +18,11 @@ st.caption(
     "Automated Hypothesis Generation, Sandboxed Execution & Research Publishing"
 )
 
-# 1. Safe Secret Validation
+# 1. Safe Secret Validation (supports both service_account table & service_account_json string)
 REQUIRED_SECRETS = {
     "groq": ["api_key"],
     "github": ["token", "repo_name", "pages_repo"],
-    "gdrive": ["service_account_json", "folder_id"],
+    "gdrive": ["folder_id"],
 }
 
 missing_items = []
@@ -31,8 +31,19 @@ for section, keys in REQUIRED_SECRETS.items():
         missing_items.append(f"[{section}] (entire section missing)")
     else:
         for key in keys:
-            if key not in st.secrets[section] or not str(st.secrets[section][key]).strip():
+            if (
+                key not in st.secrets[section]
+                or not str(st.secrets[section][key]).strip()
+            ):
                 missing_items.append(f"[{section}] -> {key}")
+
+if "gdrive" in st.secrets:
+    has_table = "service_account" in st.secrets["gdrive"]
+    has_json = "service_account_json" in st.secrets["gdrive"]
+    if not (has_table or has_json):
+        missing_items.append(
+            "[gdrive.service_account] (or [gdrive] -> service_account_json)"
+        )
 
 if missing_items:
     st.error("Missing or empty configuration keys in Streamlit Secrets:")
@@ -53,8 +64,14 @@ try:
         repo_name=st.secrets["github"]["repo_name"].strip(),
         pages_repo=st.secrets["github"]["pages_repo"].strip(),
     )
+
+    sa_creds = (
+        st.secrets["gdrive"]["service_account"]
+        if "service_account" in st.secrets["gdrive"]
+        else st.secrets["gdrive"]["service_account_json"]
+    )
     drive = GDriveStore(
-        service_account_json_str=st.secrets["gdrive"]["service_account_json"],
+        service_account_info=sa_creds,
         folder_id=st.secrets["gdrive"]["folder_id"].strip(),
     )
 except Exception as e:
@@ -82,11 +99,15 @@ with tab_run:
     with col2:
         st.subheader("Agentic Research Execution")
         if st.button("🚀 Run Autonomous Research Cycle", type="primary"):
-            with st.status("Running AI Scientist Loop...", expanded=True) as status:
+            with st.status(
+                "Running AI Scientist Loop...", expanded=True
+            ) as status:
                 st.write("1️⃣ Executing current baseline...")
                 base_res = execute_experiment(baseline_path)
                 if not base_res["success"]:
-                    st.error(f"Baseline Execution Failed:\n{base_res['error']}")
+                    st.error(
+                        f"Baseline Execution Failed:\n{base_res['error']}"
+                    )
                     status.update(label="Baseline Failed", state="error")
                     st.stop()
 
@@ -106,11 +127,15 @@ with tab_run:
                 with open(cand_path, "w") as f:
                     f.write(candidate_code)
 
-                st.write("4️⃣ Running AST safety check & sandboxed execution...")
+                st.write(
+                    "4️⃣ Running AST safety check & sandboxed execution..."
+                )
                 cand_res = execute_experiment(cand_path)
 
                 if not cand_res["success"]:
-                    st.error(f"Sandbox Execution Failed:\n{cand_res['error']}")
+                    st.error(
+                        f"Sandbox Execution Failed:\n{cand_res['error']}"
+                    )
                     status.update(label="Experiment Failed", state="error")
                 else:
                     new_metrics = cand_res["metrics"]
@@ -136,7 +161,9 @@ with tab_run:
                         )
 
                         # Create GitHub PR
-                        branch = f"exp-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+                        branch = (
+                            f"exp-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
+                        )
                         pr_body = (
                             f"### Hypothesis\n{hyp.rationale}\n\n"
                             f"### Metrics\n- Baseline: `{base_metrics}`\n- Candidate: `{new_metrics}`\n\n"
@@ -148,7 +175,9 @@ with tab_run:
 
                         st.session_state["latest_paper"] = paper_md
                         st.session_state["latest_slug"] = branch
-                        st.markdown(f"✅ **Pull Request Opened:** [{pr_url}]({pr_url})")
+                        st.markdown(
+                            f"✅ **Pull Request Opened:** [{pr_url}]({pr_url})"
+                        )
                         status.update(
                             label="Research Cycle Complete!", state="complete"
                         )
@@ -175,7 +204,9 @@ with tab_drive:
         try:
             files = drive.list_artifacts()
             if not files:
-                st.info("No artifacts found in the configured Drive folder yet.")
+                st.info(
+                    "No artifacts found in the configured Drive folder yet."
+                )
             for f in files:
                 st.markdown(
                     f"- **{f['name']}** ({f['createdTime']}) — [View in Drive]({f['webViewLink']})"
