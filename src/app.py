@@ -1,7 +1,9 @@
 from datetime import datetime
 import difflib
 import os
+import pandas as pd
 import streamlit as st
+import yfinance as yf
 
 from gdrive_store import GDriveStore
 from github_sync import GitHubManager
@@ -102,6 +104,44 @@ with st.sidebar:
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
 with tab_run:
+    # Live Yahoo Finance Dataset Fetcher (saves safely to data/market_data.csv)
+    with st.expander(
+        "📈 Configure Market Dataset (Yahoo Finance)", expanded=True
+    ):
+        d_col1, d_col2, d_col3 = st.columns([2, 1, 1])
+        ticker = d_col1.text_input(
+            "Ticker Symbol (e.g., ^NSEI, RELIANCE.NS, TCS.NS, SPY)",
+            value="^NSEI",
+        )
+        period = d_col2.selectbox("History", ["5y", "10y", "max"], index=1)
+        d_col3.write("")
+        d_col3.write("")
+        if d_col3.button("⬇️ Fetch Market Data"):
+            with st.spinner(f"Downloading {ticker}..."):
+                hist = yf.download(ticker, period=period, progress=False)
+                if hist.empty:
+                    st.error(f"No data returned for `{ticker}`.")
+                else:
+                    if isinstance(hist.columns, pd.MultiIndex):
+                        hist.columns = hist.columns.get_level_values(0)
+                    os.makedirs("data", exist_ok=True)
+                    hist.reset_index().to_csv(
+                        "data/market_data.csv", index=False
+                    )
+                    st.success(
+                        f"Saved {len(hist)} trading days for **{ticker}** to `data/market_data.csv`!"
+                    )
+
+        if os.path.exists("data/market_data.csv"):
+            cached_df = pd.read_csv("data/market_data.csv")
+            st.caption(
+                f"✅ Active local dataset: `data/market_data.csv` ({len(cached_df)} rows)"
+            )
+        else:
+            st.caption(
+                "ℹ️ No local CSV yet — baseline will use fallback synthetic data until you click **Fetch Market Data**."
+            )
+
     col1, col2 = st.columns(2)
 
     baseline_path = "baselines/baseline_experiment.py"
