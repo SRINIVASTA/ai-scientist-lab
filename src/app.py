@@ -8,31 +8,71 @@ from groq_agents import AIScientistPipeline
 from sandbox_runner import execute_experiment
 
 st.set_page_config(
-    page_title="AI Scientist Lab | Srinivasta", page_icon="🔬", layout="wide"
+    page_title="AI Scientist Lab | Srinivasta",
+    page_icon="🔬",
+    layout="wide",
 )
+
 st.title("🔬 Autonomous AI Scientist Lab")
 st.caption(
     "Automated Hypothesis Generation, Sandboxed Execution & Research Publishing"
 )
 
-# Initialize clients from secrets
-groq_agent = AIScientistPipeline(api_key=st.secrets["groq"]["api_key"])
-gh_mgr = GitHubManager(
-    token=st.secrets["github"]["token"],
-    repo_name=st.secrets["github"]["repo_name"],
-    pages_repo=st.secrets["github"]["pages_repo"],
-)
-drive = GDriveStore(
-    service_account_json_str=st.secrets["gdrive"]["service_account_json"],
-    folder_id=st.secrets["gdrive"]["folder_id"],
-)
+# 1. Safe Secret Validation
+REQUIRED_SECRETS = {
+    "groq": ["api_key"],
+    "github": ["token", "repo_name", "pages_repo"],
+    "gdrive": ["service_account_json", "folder_id"],
+}
 
+missing_items = []
+for section, keys in REQUIRED_SECRETS.items():
+    if section not in st.secrets:
+        missing_items.append(f"[{section}] (entire section missing)")
+    else:
+        for key in keys:
+            if key not in st.secrets[section] or not str(st.secrets[section][key]).strip():
+                missing_items.append(f"[{section}] -> {key}")
+
+if missing_items:
+    st.error("Missing or empty configuration keys in Streamlit Secrets:")
+    for item in missing_items:
+        st.markdown(f"- `{item}`")
+    st.info(
+        "Open **Manage app -> Settings -> Secrets** and ensure `[groq]`, `[github]`, and `[gdrive]` are properly configured."
+    )
+    st.stop()
+
+# 2. Initialize Service Clients Safely
+try:
+    groq_agent = AIScientistPipeline(
+        api_key=st.secrets["groq"]["api_key"].strip()
+    )
+    gh_mgr = GitHubManager(
+        token=st.secrets["github"]["token"].strip(),
+        repo_name=st.secrets["github"]["repo_name"].strip(),
+        pages_repo=st.secrets["github"]["pages_repo"].strip(),
+    )
+    drive = GDriveStore(
+        service_account_json_str=st.secrets["gdrive"]["service_account_json"],
+        folder_id=st.secrets["gdrive"]["folder_id"].strip(),
+    )
+except Exception as e:
+    st.error(f"Failed to initialize external services: {e}")
+    st.stop()
+
+# 3. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
 with tab_run:
-    col1, col2 = st.columns([1, 1])
+    col1, col2 = st.columns(2)
 
-    with open("baselines/baseline_experiment.py", "r") as f:
+    baseline_path = "baselines/baseline_experiment.py"
+    if not os.path.exists(baseline_path):
+        st.error(f"Baseline file not found at `{baseline_path}`.")
+        st.stop()
+
+    with open(baseline_path, "r") as f:
         baseline_code = f.read()
 
     with col1:
@@ -44,7 +84,12 @@ with tab_run:
         if st.button("🚀 Run Autonomous Research Cycle", type="primary"):
             with st.status("Running AI Scientist Loop...", expanded=True) as status:
                 st.write("1️⃣ Executing current baseline...")
-                base_res = execute_experiment("baselines/baseline_experiment.py")
+                base_res = execute_experiment(baseline_path)
+                if not base_res["success"]:
+                    st.error(f"Baseline Execution Failed:\n{base_res['error']}")
+                    status.update(label="Baseline Failed", state="error")
+                    st.stop()
+
                 base_metrics = base_res.get("metrics", {})
                 st.write(f"Baseline Metrics: `{base_metrics}`")
 
@@ -127,8 +172,13 @@ with tab_run:
 with tab_drive:
     st.subheader("Google Drive Experiment Archive")
     if st.button("🔄 Refresh Artifacts"):
-        files = drive.list_artifacts()
-        for f in files:
-            st.markdown(
-                f"- **{f['name']}** ({f['createdTime']}) — [View in Drive]({f['webViewLink']})"
-            )
+        try:
+            files = drive.list_artifacts()
+            if not files:
+                st.info("No artifacts found in the configured Drive folder yet.")
+            for f in files:
+                st.markdown(
+                    f"- **{f['name']}** ({f['createdTime']}) — [View in Drive]({f['webViewLink']})"
+                )
+        except Exception as e:
+            st.error(f"Could not fetch Drive artifacts: {e}")
