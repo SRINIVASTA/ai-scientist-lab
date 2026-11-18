@@ -8,12 +8,20 @@ from googleapiclient.http import MediaFileUpload
 class GDriveStore:
 
     def __init__(self, service_account_json_str: str, folder_id: str):
-        creds_dict = json.loads(service_account_json_str)
+        creds_dict = json.loads(service_account_json_str, strict=False)
+
+        # Fix literal "\n" escaping issues caused by TOML multiline strings
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace(
+                "\\n", "\n"
+            )
+
         creds = service_account.Credentials.from_service_account_info(
-            creds_dict, scopes=["https://googleapis.com"]
+            creds_dict,
+            scopes=["https://googleapis.com"],
         )
         self.service = build("drive", "v3", credentials=creds)
-        self.folder_id = folder_id
+        self.folder_id = folder_id.strip()
 
     def upload_file(
         self, local_path: str, mime_type: str = "application/octet-stream"
@@ -25,7 +33,9 @@ class GDriveStore:
         media = MediaFileUpload(local_path, mimetype=mime_type)
         uploaded = (
             self.service.files()
-            .create(body=file_metadata, media_body=media, fields="id, webViewLink")
+            .create(
+                body=file_metadata, media_body=media, fields="id, webViewLink"
+            )
             .execute()
         )
         return uploaded.get("webViewLink", "")
