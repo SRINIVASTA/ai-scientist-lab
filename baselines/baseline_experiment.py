@@ -1,10 +1,34 @@
-import json
 import os
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score
+
+
+def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    # RSI (14‑day)
+    delta = df["Close"].diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.rolling(14).mean()
+    roll_down = down.rolling(14).mean()
+    rs = roll_up / roll_down.replace(0, np.nan).bfill()
+    df["rsi_14"] = 100 - (100 / (1 + rs))
+
+    # MACD (12‑EMA minus 26‑EMA) and signal line (9‑EMA of MACD)
+    ema12 = df["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = df["Close"].ewm(span=26, adjust=False).mean()
+    df["macd"] = ema12 - ema26
+    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+    df["macd_hist"] = df["macd"] - df["macd_signal"]
+
+    # Bollinger Band width (2 * std / SMA)
+    sma20 = df["Close"].rolling(20).mean()
+    std20 = df["Close"].rolling(20).std()
+    df["bb_width"] = (2 * std20) / sma20
+    return df
 
 
 def load_market_data() -> pd.DataFrame:
@@ -35,7 +59,13 @@ def load_market_data() -> pd.DataFrame:
 
     # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
     df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
-    return df.dropna().reset_index(drop=True)
+
+    # Add technical indicators
+    df = add_technical_indicators(df)
+
+    # Drop rows with NaNs introduced by rolling calculations
+    df = df.dropna().reset_index(drop=True)
+    return df
 
 
 def run_experiment():
@@ -47,6 +77,11 @@ def run_experiment():
         "vol_10d",
         "sma_ratio",
         "hl_spread",
+        "rsi_14",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "bb_width",
     ]
     X = df[feature_cols]
     y = df["target"]
@@ -56,25 +91,24 @@ def run_experiment():
     X_train, X_val = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_val = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=200, max_depth=8, random_state=42
+    )
     model.fit(X_train, y_train)
 
     preds = model.predict(X_val)
     acc = accuracy_score(y_val, preds)
-    f1 = f1_score(y_val, preds)
 
     os.makedirs("outputs", exist_ok=True)
 
     plt.figure(figsize=(6, 4))
-    plt.bar(
-        ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
-    )
+    plt.bar(["5D Trend Acc"], [acc], color="#1f77b4")
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample 5-Day Swing Direction Metrics")
+    plt.title("Out-of-Sample 5-Day Swing Direction Accuracy")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
-    results = {"val_accuracy": round(acc, 4), "val_f1": round(f1, 4)}
+    results = {"val_accuracy": round(acc, 4)}
     with open("outputs/metrics.json", "w") as f:
         json.dump(results, f)
 
