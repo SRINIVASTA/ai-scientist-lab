@@ -1,13 +1,16 @@
 from datetime import datetime
-from github import Github
+from github import Auth, Github
 
 
 class GitHubManager:
 
     def __init__(self, token: str, repo_name: str, pages_repo: str):
-        self.gh = Github(token)
-        self.repo = self.gh.get_repo(repo_name)
-        self.pages_repo = self.gh.get_repo(pages_repo)
+        # Updated PyGithub modern Auth syntax + strip whitespace
+        auth = Auth.Token(token.strip())
+        self.gh = Github(auth=auth)
+        # lazy=True avoids making an API call during app startup
+        self.repo = self.gh.get_repo(repo_name, lazy=True)
+        self.pages_repo = self.gh.get_repo(pages_repo, lazy=True)
 
     def create_experiment_pr(
         self,
@@ -22,7 +25,6 @@ class GitHubManager:
             ref=f"refs/heads/{branch_name}", sha=main_branch.commit.sha
         )
 
-        # Update baseline script in the new branch
         contents = self.repo.get_contents(
             "baselines/baseline_experiment.py", ref=branch_name
         )
@@ -34,7 +36,6 @@ class GitHubManager:
             branch=branch_name,
         )
 
-        # Commit research paper draft
         report_path = f"reports/{branch_name}.md"
         self.repo.create_file(
             path=report_path,
