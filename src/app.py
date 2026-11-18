@@ -1,7 +1,9 @@
 from datetime import datetime
 import difflib
 import os
+import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
 import streamlit as st
 import yfinance as yf
 
@@ -47,6 +49,73 @@ def generate_unified_diff(old_code: str, new_code: str) -> str:
     return "\n".join(diff) or "# No code changes detected"
 
 
+def compute_live_5d_forecast(csv_path: str = "data/market_data.csv"):
+    """Trains the multi-scale feature model on all available history and forecasts the next 5 trading days."""
+    if not os.path.exists(csv_path):
+        return None
+
+    df = pd.read_csv(csv_path)
+    if len(df) < 60 or "Close" not in df.columns:
+        return None
+
+    df["ret_1d"] = df["Close"].pct_change(1)
+    df["ret_5d"] = df["Close"].pct_change(5)
+    df["ret_20d"] = df["Close"].pct_change(20)
+    df["vol_5d"] = df["ret_1d"].rolling(5).std()
+    df["vol_10d"] = df["ret_1d"].rolling(10).std()
+    df["vol_20d"] = df["ret_1d"].rolling(20).std()
+    df["sma_ratio"] = df["Close"] / df["Close"].rolling(20).mean() - 1.0
+
+    for lag in:
+        df[f"ret_1d_lag{lag}"] = df["ret_1d"].shift(lag)
+        df[f"ret_5d_lag{lag}"] = df["ret_5d"].shift(lag)
+
+    feature_cols = [
+        "ret_1d",
+        "ret_5d",
+        "ret_20d",
+        "vol_5d",
+        "vol_10d",
+        "vol_20d",
+        "sma_ratio",
+        "ret_1d_lag1",
+        "ret_1d_lag2",
+        "ret_1d_lag3",
+        "ret_5d_lag1",
+        "ret_5d_lag2",
+        "ret_5d_lag3",
+    ]
+
+    latest_row = df[feature_cols].dropna().iloc[[-1]]
+    latest_close = float(df["Close"].iloc[-1])
+    latest_date = str(df["Date"].iloc[-1]) if "Date" in df.columns else "Latest"
+    daily_vol = float(df["vol_10d"].dropna().iloc[-1])
+
+    df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
+    train_df = df.dropna(subset=feature_cols + ["target"])
+
+    model = RandomForestClassifier(n_estimators=200, max_depth=4, random_state=42)
+    model.fit(train_df[feature_cols], train_df["target"])
+
+    prob_up = float(model.predict_proba(latest_row))
+    direction = "BULLISH (UP)" if prob_up >= 0.5 else "BEARISH (DOWN)"
+    confidence = prob_up if prob_up >= 0.5 else (1.0 - prob_up)
+
+    sigma_5d = daily_vol * np.sqrt(5)
+    expected_drift = (prob_up - 0.5) * 2 * sigma_5d
+    target_mid = latest_close * (1 + expected_drift)
+    band_low = target_mid * (1 - sigma_5d)
+    band_high = target_mid * (1 + sigma_5d)
+
+    return {
+        "as_of": latest_date,
+        "current_close": round(latest_close, 2),
+        "direction": direction,
+        "confidence_pct": round(confidence * 100, 1),
+        "target_mid": round(target_mid, 2),
+        "range_low": round(band_low, 2),
+        "range_high": round(band_high, 2),
+    }
 # 1. Detect Live vs. Dummy Secrets
 groq_key = st.secrets.get("groq", {}).get("api_key", "")
 gh_token = st.secrets.get("github", {}).get("token", "")
@@ -108,6 +177,7 @@ with st.sidebar:
     if st.button("🗑️ Clear Experiment Memory"):
         st.session_state["experiment_history"] = []
         st.rerun()
+
 # 2. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
@@ -135,20 +205,21 @@ with tab_run:
                     hist.reset_index().to_csv(
                         "data/market_data.csv", index=False
                     )
+                    st.session_state["active_ticker"] = ticker
                     st.success(
                         f"Saved {len(hist)} trading days for **{ticker}** to `data/market_data.csv`!"
                     )
 
         if os.path.exists("data/market_data.csv"):
             cached_df = pd.read_csv("data/market_data.csv")
+            active_sym = st.session_state.get("active_ticker", "^NSEI")
             st.caption(
-                f"✅ Active local dataset: `data/market_data.csv` ({len(cached_df)} rows)"
+                f"✅ Active local dataset: `{active_sym}` in `data/market_data.csv` ({len(cached_df)} rows)"
             )
         else:
             st.caption(
-                "ℹ️ No local CSV yet — baseline will use fallback synthetic data until you click **Fetch Market Data**."
+                "ℹ️ No local CSV yet — click **Fetch Market Data** to download real market prices."
             )
-
     col1, col2 = st.columns(2)
 
     baseline_path = "baselines/baseline_experiment.py"
@@ -352,6 +423,36 @@ with tab_run:
                         label="Completed all attempts — baseline remains unbeaten.",
                         state="complete",
                     )
+
+    # Live 5-Day Price Range & Signal Forecast Card
+    if os.path.exists("data/market_data.csv"):
+        st.divider()
+        active_sym = st.session_state.get("active_ticker", "^NSEI")
+        st.subheader(f"🎯 Live 5-Trading-Day Forecast ({active_sym})")
+        forecast = compute_live_5d_forecast("data/market_data.csv")
+        if forecast:
+            f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+            f_col1.metric(
+                label=f"Latest Close ({forecast['as_of'][:10]})",
+                value=f"{forecast['current_close']:,.2f}",
+            )
+            f_col2.metric(
+                label="5-Day AI Signal",
+                value=forecast["direction"],
+                delta=f"{forecast['confidence_pct']}% Confidence",
+            )
+            f_col3.metric(
+                label="5-Day Expected Target",
+                value=f"{forecast['target_mid']:,.2f}",
+                delta=f"{forecast['target_mid'] - forecast['current_close']:+,.2f}",
+            )
+            f_col4.metric(
+                label="5-Day Projected Range",
+                value=f"{forecast['range_low']:,.0f} – {forecast['range_high']:,.0f}",
+            )
+            st.caption(
+                "Note: Range reflects a ±1σ 5-trading-day volatility envelope derived from historical returns. For research and educational purposes only."
+            )
 
     if "latest_diff" in st.session_state:
         st.divider()
