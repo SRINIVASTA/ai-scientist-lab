@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import subprocess
+import sys
 from typing import Any, Dict, Tuple
 
 BLOCKED_MODULES = {
@@ -20,12 +21,6 @@ BLOCKED_MODULES = {
     "builtins",
 }
 
-ALLOWED_OS_CALLS = {"makedirs", "path.join", "path.exists"}
-
-
-class SafetyError(Exception):
-    pass
-
 
 def validate_code_ast(code: str) -> Tuple[bool, str]:
     """Parses Python code AST to block malicious system or network calls."""
@@ -35,7 +30,6 @@ def validate_code_ast(code: str) -> Tuple[bool, str]:
         return False, f"SyntaxError: {e}"
 
     for node in ast.walk(tree):
-        # Block dangerous imports
         if isinstance(node, ast.Import):
             for alias in node.names:
                 root_mod = alias.name.split(".")[0]
@@ -46,8 +40,6 @@ def validate_code_ast(code: str) -> Tuple[bool, str]:
                 root_mod = node.module.split(".")[0]
                 if root_mod in BLOCKED_MODULES:
                     return False, f"Blocked from-import detected: {node.module}"
-
-        # Block eval/exec/open outside outputs
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in {
                 "eval",
@@ -83,7 +75,7 @@ def execute_experiment(
 
     try:
         proc = subprocess.run(
-            ["python", script_path],
+            [sys.executable, script_path],
             capture_output=True,
             text=True,
             timeout=timeout_sec,
