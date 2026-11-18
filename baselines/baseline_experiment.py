@@ -1,10 +1,10 @@
-import json
 import os
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score
 
 
 def compute_rolling_shannon_entropy(
@@ -21,7 +21,7 @@ def compute_rolling_shannon_entropy(
 
 
 def load_market_data() -> pd.DataFrame:
-    """Loads real yfinance OHLCV data saved at data/market_data.csv."""
+    """Loads market data and creates lagged features."""
     csv_path = "data/market_data.csv"
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
@@ -49,15 +49,9 @@ def load_market_data() -> pd.DataFrame:
     df["shannon_entropy_20d"] = compute_rolling_shannon_entropy(
         df["log_ret"], window=20, bins=8
     )
-
-    # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
     df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
-    return df.dropna().reset_index(drop=True)
 
-
-def run_experiment():
-    df = load_market_data()
-    feature_cols = [
+    base_features = [
         "ret_1d",
         "ret_5d",
         "ret_20d",
@@ -66,33 +60,59 @@ def run_experiment():
         "hl_spread",
         "shannon_entropy_20d",
     ]
+
+    # create lagged versions (lags 1 and 2)
+    for col in base_features:
+        for lag in (1, 2):
+            df[f"{col}_lag{lag}"] = df[col].shift(lag)
+
+    df.dropna(inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    return df
+
+
+def run_experiment():
+    df = load_market_data()
+
+    base_features = [
+        "ret_1d",
+        "ret_5d",
+        "ret_20d",
+        "vol_10d",
+        "sma_ratio",
+        "hl_spread",
+        "shannon_entropy_20d",
+    ]
+    lagged_features = [
+        f"{col}_lag{lag}" for col in base_features for lag in (1, 2)
+    ]
+    feature_cols = base_features + lagged_features
+
     X = df[feature_cols]
     y = df["target"]
 
-    # Strict chronological train/validation split (80% past, 20% future)
     split_idx = int(len(df) * 0.8)
     X_train, X_val = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_val = y.iloc[:split_idx], y.iloc[split_idx:]
 
-    model = RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)
+    model = RandomForestClassifier(
+        n_estimators=200, max_depth=8, random_state=42
+    )
     model.fit(X_train, y_train)
 
     preds = model.predict(X_val)
     acc = accuracy_score(y_val, preds)
-    f1 = f1_score(y_val, preds)
 
     os.makedirs("outputs", exist_ok=True)
 
-    plt.figure(figsize=(6, 4))
-    plt.bar(
-        ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
-    )
+    plt.figure(figsize=(4, 4))
+    plt.bar(["Val Accuracy"], [acc], color="#1f77b4")
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample 5-Day Swing Metrics (With Shannon Entropy)")
+    plt.title("Out‑of‑Sample Accuracy")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
-    results = {"val_accuracy": round(acc, 4), "val_f1": round(f1, 4)}
+    results = {"val_accuracy": round(acc, 4)}
     with open("outputs/metrics.json", "w") as f:
         json.dump(results, f)
 
