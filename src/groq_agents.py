@@ -143,13 +143,15 @@ class AIScientistPipeline:
         critic: CriticOutput,
         baseline_code: str = "",
     ) -> str:
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         sys_prompt = (
             "You are an AI Research Author writing for srinivasta.github.io. "
-            "Start the file directly with standard --- YAML frontmatter (title, date, tags) — NEVER wrap frontmatter in ```yaml fences. "
+            f"Start the file directly with standard --- YAML frontmatter containing title, date: {today_str}, and tags — NEVER wrap frontmatter in ```yaml fences. "
             "Include Abstract, Hypothesis, Methodology, Empirical Results table, and Conclusion. "
             "CRITICAL: Only cite exact hyperparameters, features, and metrics present in the provided code and metrics—never invent dates or values."
         )
         user_msg = (
+            f"Today's Date: {today_str}\n"
             f"Baseline Code:\n{baseline_code}\n\n"
             f"Hypothesis: {hypothesis.model_dump_json()}\n"
             f"Baseline Metrics: {baseline_metrics}\n"
