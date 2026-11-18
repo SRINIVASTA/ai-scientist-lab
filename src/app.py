@@ -488,26 +488,34 @@ with tab_run:
         st.subheader("📄 Generated Research Paper")
         st.markdown(st.session_state["latest_paper"])
 
-        dl_col1, dl_col2, dl_col3 = st.columns(3)
+        dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
         slug = st.session_state.get("latest_slug", "experiment")
 
         with dl_col1:
+            pdf_bytes = generate_research_pdf(st.session_state["latest_paper"])
             st.download_button(
-                label="⬇️ Download Research Paper (.md)",
+                label="📕 Download Report (.pdf)",
+                data=pdf_bytes,
+                file_name=f"{slug}.pdf",
+                mime="application/pdf",
+            )
+        with dl_col2:
+            st.download_button(
+                label="📝 Download Report (.md)",
                 data=st.session_state["latest_paper"],
                 file_name=f"{slug}.md",
                 mime="text/markdown",
             )
-        with dl_col2:
+        with dl_col3:
             if "latest_winner_code" in st.session_state:
                 st.download_button(
-                    label="⬇️ Download Winning Model (.py)",
+                    label="🐍 Download Model (.py)",
                     data=st.session_state["latest_winner_code"],
                     file_name=f"{slug}.py",
                     mime="text/x-python",
                 )
-        with dl_col3:
-            if st.button("🌐 Publish Report to srinivasta.github.io"):
+        with dl_col4:
+            if st.button("🌐 Publish to srinivasta.github.io"):
                 if gh_live:
                     live_url = gh_mgr.publish_to_portfolio(
                         slug,
