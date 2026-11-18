@@ -21,6 +21,9 @@ st.caption(
     "Automated Hypothesis Generation, Sandboxed Execution & Research Publishing"
 )
 
+if "experiment_history" not in st.session_state:
+    st.session_state["experiment_history"] = []
+
 
 def is_dummy(val: str) -> bool:
     v = str(val).strip()
@@ -97,23 +100,27 @@ with st.sidebar:
     st.markdown(
         f"- **Google Drive:** {'🟢 Live' if drive else '🟡 Disabled (Dummy Key)'}"
     )
-    st.info(
-        "Replace dummy values in **Manage app -> Settings -> Secrets** whenever you are ready to go live."
+    st.divider()
+    st.subheader("🧠 Experiment Memory")
+    st.caption(
+        f"Logged runs in session: {len(st.session_state['experiment_history'])}"
     )
+    if st.button("🗑️ Clear Experiment Memory"):
+        st.session_state["experiment_history"] = []
+        st.rerun()
 # 2. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
 with tab_run:
-    # Live Yahoo Finance Dataset Fetcher (saves safely to data/market_data.csv)
     with st.expander(
         "📈 Configure Market Dataset (Yahoo Finance)", expanded=True
     ):
-        d_col1, d_col2, d_col3 = st.columns([2, 1, 1])
+        d_col1, d_col2, d_col3 = st.columns()
         ticker = d_col1.text_input(
             "Ticker Symbol (e.g., ^NSEI, RELIANCE.NS, TCS.NS, SPY)",
             value="^NSEI",
         )
-        period = d_col2.selectbox("History", ["5y", "10y", "max"], index=1)
+        period = d_col2.selectbox("History", ["5y", "10y", "max"], index=0)
         d_col3.write("")
         d_col3.write("")
         if d_col3.button("⬇️ Fetch Market Data"):
@@ -158,6 +165,13 @@ with tab_run:
 
     with col2:
         st.subheader("Agentic Research Execution")
+        max_attempts = st.slider(
+            "Max Autonomous Attempts per Run (stops early once baseline is beaten)",
+            min_value=1,
+            max_value=5,
+            value=3,
+        )
+
         if st.button("🚀 Run Autonomous Research Cycle", type="primary"):
             with st.status(
                 "Running AI Scientist Loop...", expanded=True
@@ -174,65 +188,67 @@ with tab_run:
                 base_metrics = base_res.get("metrics", {})
                 st.write(f"Baseline Metrics: `{base_metrics}`")
 
-                if groq_live:
-                    st.write("2️⃣ Groq Researcher generating hypothesis...")
-                    hyp = groq_agent.generate_hypothesis(
-                        baseline_code, str(base_metrics)
-                    )
-                    st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
-
-                    st.write("3️⃣ Groq Engineer writing candidate experiment...")
-                    candidate_code = groq_agent.write_code(baseline_code, hyp)
-                else:
-                    st.write("2️⃣ [Demo Mode] Generating sample hypothesis...")
-                    hyp = HypothesisOutput(
-                        title="Gradient Boosting with Regime Volatility Features",
-                        rationale="Replacing shallow RandomForest with GradientBoostingClassifier better captures nonlinear return-volatility interactions.",
-                        proposed_changes="Use GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, random_state=42).",
-                    )
-                    st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
-
-                    st.write("3️⃣ [Demo Mode] Preparing candidate script...")
-                    candidate_code = baseline_code.replace(
-                        "from sklearn.ensemble import RandomForestClassifier",
-                        "from sklearn.ensemble import GradientBoostingClassifier",
-                    ).replace(
-                        "RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)",
-                        "GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, random_state=42)",
+                approved_run = False
+                for attempt in range(1, max_attempts + 1):
+                    st.markdown(f"---\n### 🔄 Iteration {attempt}/{max_attempts}")
+                    history_context = (
+                        f"Baseline: {base_metrics}\nPast Attempts:\n"
+                        + "\n".join(st.session_state["experiment_history"][-6:])
                     )
 
-                os.makedirs("outputs", exist_ok=True)
-                cand_path = "outputs/candidate_experiment.py"
-                with open(cand_path, "w") as f:
-                    f.write(candidate_code)
+                    if groq_live:
+                        st.write("2️⃣ Groq Researcher generating hypothesis from memory...")
+                        hyp = groq_agent.generate_hypothesis(
+                            baseline_code, history_context
+                        )
+                        st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
 
-                st.write(
-                    "4️⃣ Running AST safety check & sandboxed execution..."
-                )
-                cand_res = execute_experiment(cand_path)
+                        st.write("3️⃣ Groq Engineer writing candidate experiment...")
+                        candidate_code = groq_agent.write_code(baseline_code, hyp)
+                    else:
+                        st.write("2️⃣ [Demo Mode] Generating sample hypothesis...")
+                        hyp = HypothesisOutput(
+                            title="Regularized Logistic Regression on Trend Ratios",
+                            rationale="Replacing unregularized trees with L2-penalized LogisticRegression reduces overfitting on 5-day swing features.",
+                            proposed_changes="Use StandardScaler + LogisticRegression(C=0.1, random_state=42).",
+                        )
+                        st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
+                        candidate_code = baseline_code.replace(
+                            "from sklearn.ensemble import RandomForestClassifier",
+                            "from sklearn.linear_model import LogisticRegression\nfrom sklearn.preprocessing import StandardScaler\nfrom sklearn.pipeline import make_pipeline",
+                        ).replace(
+                            "RandomForestClassifier(n_estimators=50, max_depth=4, random_state=42)",
+                            "make_pipeline(StandardScaler(), LogisticRegression(C=0.1, random_state=42))",
+                        )
 
-                # Self-healing auto-debug loop (up to 2 retries if live Groq is active)
-                retry_count = 0
-                while not cand_res["success"] and groq_live and retry_count < 2:
-                    retry_count += 1
-                    st.warning(
-                        f"⚠️ Runtime error detected. Groq Engineer auto-fixing (Attempt {retry_count}/2)..."
-                    )
-                    candidate_code = groq_agent.fix_code(
-                        candidate_code, cand_res["error"]
-                    )
+                    os.makedirs("outputs", exist_ok=True)
+                    cand_path = "outputs/candidate_experiment.py"
                     with open(cand_path, "w") as f:
                         f.write(candidate_code)
+
+                    st.write("4️⃣ Running AST safety check & sandboxed execution...")
                     cand_res = execute_experiment(cand_path)
-                if not cand_res["success"]:
-                    st.session_state.pop("latest_paper", None)
-                    st.session_state.pop("latest_slug", None)
-                    st.session_state.pop("latest_diff", None)
-                    st.error(
-                        f"Sandbox Execution Failed:\n{cand_res['error']}"
-                    )
-                    status.update(label="Experiment Failed", state="error")
-                else:
+
+                    retry_count = 0
+                    while not cand_res["success"] and groq_live and retry_count < 2:
+                        retry_count += 1
+                        st.warning(
+                            f"⚠️ Runtime error detected. Auto-fixing (Debug {retry_count}/2)..."
+                        )
+                        candidate_code = groq_agent.fix_code(
+                            candidate_code, cand_res["error"]
+                        )
+                        with open(cand_path, "w") as f:
+                            f.write(candidate_code)
+                        cand_res = execute_experiment(cand_path)
+
+                    if not cand_res["success"]:
+                        st.session_state["experiment_history"].append(
+                            f"- [FAILED CODE] {hyp.title}: {cand_res['error'][:120]}"
+                        )
+                        st.error(f"Sandbox Execution Failed:\n{cand_res['error']}")
+                        continue
+
                     new_metrics = cand_res["metrics"]
                     st.write(f"New Metrics: `{new_metrics}`")
 
@@ -245,14 +261,13 @@ with tab_run:
                         improved = new_metrics.get(
                             "val_accuracy", 0
                         ) > base_metrics.get("val_accuracy", 0)
-                        feedback_msg = (
-                            "[Demo Mode] Out-of-sample directional accuracy improved without lookahead leakage."
-                            if improved
-                            else "[Demo Mode] Candidate model underperformed baseline out-of-sample (likely overfitting noisy returns)."
-                        )
                         critic = CriticOutput(
                             approved=improved,
-                            feedback=feedback_msg,
+                            feedback=(
+                                "[Demo Mode] Out-of-sample 5-day swing accuracy improved."
+                                if improved
+                                else "[Demo Mode] Did not beat baseline out-of-sample."
+                            ),
                         )
 
                     st.session_state["latest_diff"] = generate_unified_diff(
@@ -260,8 +275,10 @@ with tab_run:
                     )
                     st.session_state["base_metrics"] = base_metrics
                     st.session_state["new_metrics"] = new_metrics
-
                     if critic.approved:
+                        st.session_state["experiment_history"].append(
+                            f"- [APPROVED] {hyp.title} -> {new_metrics}"
+                        )
                         st.success(f"Approved by Critic: {critic.feedback}")
                         if groq_live:
                             paper_md = groq_agent.draft_paper(
@@ -310,18 +327,26 @@ with tab_run:
 
                         st.session_state["latest_paper"] = paper_md
                         st.session_state["latest_slug"] = branch
+                        approved_run = True
                         status.update(
-                            label="Research Cycle Complete!", state="complete"
+                            label=f"Winning Hypothesis Found on Attempt {attempt}!",
+                            state="complete",
                         )
+                        break
                     else:
-                        st.session_state.pop("latest_paper", None)
-                        st.session_state.pop("latest_slug", None)
-                        st.warning(f"Rejected by Critic: {critic.feedback}")
-                        status.update(
-                            label="Hypothesis Rejected", state="complete"
+                        st.session_state["experiment_history"].append(
+                            f"- [REJECTED] {hyp.title} -> {new_metrics} (Reason: {critic.feedback})"
                         )
+                        st.warning(f"Rejected by Critic: {critic.feedback}")
 
-    # Visual Diff & Diagnostic Plot Section
+                if not approved_run:
+                    st.session_state.pop("latest_paper", None)
+                    st.session_state.pop("latest_slug", None)
+                    status.update(
+                        label="Completed all attempts — baseline remains unbeaten.",
+                        state="complete",
+                    )
+
     if "latest_diff" in st.session_state:
         st.divider()
         vis_col1, vis_col2 = st.columns(2)
