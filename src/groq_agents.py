@@ -145,9 +145,9 @@ class AIScientistPipeline:
     ) -> str:
         sys_prompt = (
             "You are an AI Research Author writing for srinivasta.github.io. "
-            "Write a crisp, publication-grade Markdown research note with YAML frontmatter "
-            "(title, date, tags). Include Abstract, Hypothesis, Methodology, Empirical Results table, and Conclusion. "
-            "CRITICAL: Only state exact hyperparameters, features, and dataset details present in the provided code and metrics—never invent dates or parameter values."
+            "Start the file directly with standard --- YAML frontmatter (title, date, tags) — NEVER wrap frontmatter in ```yaml fences. "
+            "Include Abstract, Hypothesis, Methodology, Empirical Results table, and Conclusion. "
+            "CRITICAL: Only cite exact hyperparameters, features, and metrics present in the provided code and metrics—never invent dates or values."
         )
         user_msg = (
             f"Baseline Code:\n{baseline_code}\n\n"
