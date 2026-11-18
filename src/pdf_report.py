@@ -16,17 +16,80 @@ def _sanitize_latin1(text: str) -> str:
         "\u202f": " ",
         "\u2248": "~",
         "\u2192": "->",
+        "\u00b1": "+/-",
+        "\u03c3": "sigma",
     }
     for old_ch, new_ch in replacements.items():
         text = text.replace(old_ch, new_ch)
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+def _render_forecast_box(pdf: FPDF, forecast: dict, ticker: str) -> None:
+    """Renders the Live Market Forecast metrics as a clean 4-column summary table."""
+    h_days = forecast.get("horizon_days", 5)
+    as_of = str(forecast.get("as_of", ""))[:10]
+    close_val = f"{forecast['current_close']:,.2f}"
+    sig_val = f"{forecast['direction']} ({forecast['confidence_pct']}%)"
+    diff = forecast["target_mid"] - forecast["current_close"]
+    tgt_val = f"{forecast['target_mid']:,.2f} ({diff:+,.2f})"
+    rng_val = f"{forecast['range_low']:,.0f} - {forecast['range_high']:,.0f}"
+
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(25, 65, 120)
+    pdf.cell(
+        0,
+        7,
+        _sanitize_latin1(
+            f"Live {h_days}-Trading-Day Market Forecast ({ticker} as of {as_of})"
+        ),
+        ln=True,
+    )
+
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(30, 30, 30)
+    header_style = FontFace(
+        emphasis="BOLD", color=(255, 255, 255), fill_color=(25, 65, 120)
+    )
+    rows = [
+        [
+            "Latest Close",
+            f"{h_days}D AI Signal",
+            f"{h_days}D Expected Target",
+            f"{h_days}D Projected Range",
+        ],
+        [close_val, sig_val, tgt_val, rng_val],
+    ]
+    with pdf.table(
+        borders_layout="SINGLE_TOP_LINE",
+        cell_fill_color=(242, 246, 252),
+        cell_fill_mode="ROWS",
+        headings_style=header_style,
+        line_height=6,
+        padding=2,
+        width=pdf.epw,
+    ) as table:
+        for row_data in rows:
+            row = table.row()
+            for cell_text in row_data:
+                row.cell(_sanitize_latin1(cell_text))
+
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(
+        pdf.epw,
+        4.5,
+        _sanitize_latin1(
+            f"Note: Range reflects a +/-1 sigma {h_days}-trading-day volatility envelope derived from historical returns. For research purposes only."
+        ),
+    )
+    pdf.ln(4)
+
+
 def _render_markdown_table(pdf: FPDF, table_lines: list[str]) -> None:
     """Renders collected Markdown pipe rows as a clean bordered PDF table."""
     rows = []
     for raw_line in table_lines:
-        # Skip separator rows like |---|---|
         if re.match(r"^\|?[\s\-:|]+\|?\$", raw_line.strip()):
             continue
         cells = [
@@ -39,7 +102,6 @@ def _render_markdown_table(pdf: FPDF, table_lines: list[str]) -> None:
     if not rows:
         return
 
-    # Ensure uniform column count across all rows
     max_cols = max(len(r) for r in rows)
     normalized_rows = [r + [""] * (max_cols - len(r)) for r in rows]
 
@@ -68,15 +130,17 @@ def _render_markdown_table(pdf: FPDF, table_lines: list[str]) -> None:
 
 
 def generate_research_pdf(
-    markdown_text: str, plot_path: str = "outputs/metrics_plot.png"
+    markdown_text: str,
+    plot_path: str = "outputs/metrics_plot.png",
+    forecast: dict | None = None,
+    ticker: str = "^NSEI",
 ) -> bytes:
-    """Converts the Markdown research paper and diagnostic chart into a publication-grade PDF."""
+    """Converts the Markdown research paper, live forecast, and chart into a PDF."""
     pdf = FPDF()
     pdf.set_margins(left=15, top=15, right=15)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # Extract optional YAML metadata before stripping
     title_match = re.search(
         r'^title:\s*["\']?(.*?)["\']?\s*\$', markdown_text, re.MULTILINE
     )
@@ -88,9 +152,7 @@ def generate_research_pdf(
         if title_match
         else "Autonomous AI Scientist Research Report"
     )
-    paper_date = (
-        _sanitize_latin1(date_match.group(1)) if date_match else ""
-    )
+    paper_date = _sanitize_latin1(date_match.group(1)) if date_match else ""
 
     # Top Header Banner
     pdf.set_font("Helvetica", "B", 10)
@@ -108,7 +170,10 @@ def generate_research_pdf(
     pdf.line(pdf.l_margin, pdf.get_y() + 2, pdf.w - pdf.r_margin, pdf.get_y() + 2)
     pdf.ln(6)
 
-    # Strip fenced YAML block and raw top metadata lines
+    # Render Live Market Forecast Table if available
+    if forecast:
+        _render_forecast_box(pdf, forecast, ticker)
+
     clean_md = re.sub(r"^---[\s\(\S\)]*?---\s*", "", markdown_text.strip())
     clean_md = _sanitize_latin1(clean_md)
 
@@ -118,11 +183,9 @@ def generate_research_pdf(
     for line in lines:
         stripped = line.strip()
 
-        # Skip un-fenced frontmatter lines if present at top
         if re.match(r"^(title|date|tags)\s*:", stripped, re.IGNORECASE):
             continue
 
-        # Collect consecutive Markdown table lines
         if stripped.startswith("|") and "|" in stripped[1:]:
             table_buffer.append(stripped)
             continue
@@ -161,11 +224,9 @@ def generate_research_pdf(
             pdf.set_text_color(30, 30, 30)
             pdf.multi_cell(pdf.epw, 5.5, clean_line, wrapmode="CHAR")
 
-    # Flush any trailing table at end of document
     if table_buffer:
         _render_markdown_table(pdf, table_buffer)
 
-    # Embed Validation Metrics Chart if available
     if os.path.exists(plot_path):
         pdf.ln(5)
         pdf.set_x(pdf.l_margin)
