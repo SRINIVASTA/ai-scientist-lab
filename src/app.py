@@ -282,7 +282,11 @@ with tab_run:
                         st.success(f"Approved by Critic: {critic.feedback}")
                         if groq_live:
                             paper_md = groq_agent.draft_paper(
-                                hyp, base_metrics, new_metrics, critic
+                                hyp,
+                                base_metrics,
+                                new_metrics,
+                                critic,
+                                baseline_code=baseline_code,
                             )
                         else:
                             paper_md = (
@@ -327,6 +331,7 @@ with tab_run:
 
                         st.session_state["latest_paper"] = paper_md
                         st.session_state["latest_slug"] = branch
+                        st.session_state["latest_winner_code"] = candidate_code
                         approved_run = True
                         status.update(
                             label=f"Winning Hypothesis Found on Attempt {attempt}!",
@@ -342,6 +347,7 @@ with tab_run:
                 if not approved_run:
                     st.session_state.pop("latest_paper", None)
                     st.session_state.pop("latest_slug", None)
+                    st.session_state.pop("latest_winner_code", None)
                     status.update(
                         label="Completed all attempts — baseline remains unbeaten.",
                         state="complete",
@@ -366,17 +372,37 @@ with tab_run:
         st.divider()
         st.subheader("📄 Generated Research Paper")
         st.markdown(st.session_state["latest_paper"])
-        if st.button("🌐 Publish Report to srinivasta.github.io"):
-            if gh_live:
-                live_url = gh_mgr.publish_to_portfolio(
-                    st.session_state["latest_slug"],
-                    st.session_state["latest_paper"],
+
+        dl_col1, dl_col2, dl_col3 = st.columns(3)
+        slug = st.session_state.get("latest_slug", "experiment")
+
+        with dl_col1:
+            st.download_button(
+                label="⬇️ Download Research Paper (.md)",
+                data=st.session_state["latest_paper"],
+                file_name=f"{slug}.md",
+                mime="text/markdown",
+            )
+        with dl_col2:
+            if "latest_winner_code" in st.session_state:
+                st.download_button(
+                    label="⬇️ Download Winning Model (.py)",
+                    data=st.session_state["latest_winner_code"],
+                    file_name=f"{slug}.py",
+                    mime="text/x-python",
                 )
-                st.success(f"Published live to portfolio: {live_url}")
-            else:
-                st.warning(
-                    "🟡 **[Demo Mode]** Add a real GitHub PAT in Secrets to publish directly to `srinivasta.github.io`."
-                )
+        with dl_col3:
+            if st.button("🌐 Publish Report to srinivasta.github.io"):
+                if gh_live:
+                    live_url = gh_mgr.publish_to_portfolio(
+                        slug,
+                        st.session_state["latest_paper"],
+                    )
+                    st.success(f"Published live to portfolio: {live_url}")
+                else:
+                    st.warning(
+                        "🟡 **[Demo Mode]** Add a real GitHub PAT in Secrets to publish directly to `srinivasta.github.io`."
+                    )
 
 with tab_drive:
     st.subheader("Google Drive Experiment Archive")
