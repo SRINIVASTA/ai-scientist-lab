@@ -141,14 +141,19 @@ class AIScientistPipeline:
         baseline_metrics: dict,
         new_metrics: dict,
         critic: CriticOutput,
+        baseline_code: str = "",
     ) -> str:
         sys_prompt = (
             "You are an AI Research Author writing for srinivasta.github.io. "
             "Write a crisp, publication-grade Markdown research note with YAML frontmatter "
-            "(title, date, tags). Include Abstract, Hypothesis, Methodology, Empirical Results table, and Conclusion."
+            "(title, date, tags). Include Abstract, Hypothesis, Methodology, Empirical Results table, and Conclusion. "
+            "CRITICAL: Only state exact hyperparameters, features, and dataset details present in the provided code and metrics—never invent dates or parameter values."
         )
         user_msg = (
+            f"Baseline Code:\n{baseline_code}\n\n"
             f"Hypothesis: {hypothesis.model_dump_json()}\n"
-            f"Baseline: {baseline_metrics}\nNew Metrics: {new_metrics}\nReviewer Note: {critic.feedback}"
+            f"Baseline Metrics: {baseline_metrics}\n"
+            f"New Metrics: {new_metrics}\n"
+            f"Reviewer Note: {critic.feedback}"
         )
         return self._chat(sys_prompt, user_msg)
