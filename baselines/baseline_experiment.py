@@ -13,20 +13,28 @@ def load_market_data() -> pd.DataFrame:
     if os.path.exists(csv_path):
         df = pd.read_csv(csv_path)
     else:
-        # Fallback synthetic series if CSV is not yet downloaded
         rng = np.random.default_rng(42)
-        returns = rng.normal(0.0003, 0.012, size=1500)
-        df = pd.DataFrame({"Close": 100 * np.exp(np.cumsum(returns))})
+        returns = rng.normal(0.0004, 0.011, size=1500)
+        close = 100 * np.exp(np.cumsum(returns))
+        df = pd.DataFrame(
+            {
+                "Open": close * (1 + rng.normal(0, 0.003, size=1500)),
+                "High": close * (1 + np.abs(rng.normal(0, 0.006, size=1500))),
+                "Low": close * (1 - np.abs(rng.normal(0, 0.006, size=1500))),
+                "Close": close,
+                "Volume": rng.integers(100000, 500000, size=1500),
+            }
+        )
 
     df["ret_1d"] = df["Close"].pct_change(1)
     df["ret_5d"] = df["Close"].pct_change(5)
     df["ret_20d"] = df["Close"].pct_change(20)
     df["vol_10d"] = df["ret_1d"].rolling(10).std()
-    df["vol_30d"] = df["ret_1d"].rolling(30).std()
     df["sma_ratio"] = df["Close"] / df["Close"].rolling(20).mean() - 1.0
+    df["hl_spread"] = (df["High"] - df["Low"]) / df["Close"]
 
-    # Target: Next trading day positive return direction (1 = Up, 0 = Down)
-    df["target"] = (df["ret_1d"].shift(-1) > 0).astype(int)
+    # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
+    df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
     return df.dropna().reset_index(drop=True)
 
 
@@ -37,8 +45,8 @@ def run_experiment():
         "ret_5d",
         "ret_20d",
         "vol_10d",
-        "vol_30d",
         "sma_ratio",
+        "hl_spread",
     ]
     X = df[feature_cols]
     y = df["target"]
@@ -59,10 +67,10 @@ def run_experiment():
 
     plt.figure(figsize=(6, 4))
     plt.bar(
-        ["Directional Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
+        ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
     )
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample Real Market Direction Metrics")
+    plt.title("Out-of-Sample 5-Day Swing Direction Metrics")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
