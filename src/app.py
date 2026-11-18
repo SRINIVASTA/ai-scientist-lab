@@ -66,7 +66,7 @@ def compute_live_5d_forecast(csv_path: str = "data/market_data.csv"):
     df["vol_20d"] = df["ret_1d"].rolling(20).std()
     df["sma_ratio"] = df["Close"] / df["Close"].rolling(20).mean() - 1.0
 
-    for lag in:
+    for lag in (1, 2, 3):
         df[f"ret_1d_lag{lag}"] = df["ret_1d"].shift(lag)
         df[f"ret_5d_lag{lag}"] = df["ret_5d"].shift(lag)
 
