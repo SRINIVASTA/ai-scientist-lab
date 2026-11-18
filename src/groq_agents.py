@@ -60,7 +60,7 @@ class AIScientistPipeline:
                 if json_mode:
                     kwargs["response_format"] = {"type": "json_object"}
                 resp = self.client.chat.completions.create(**kwargs)
-                return resp.choices.message.content
+                return resp.choices[0].message.content
             except NotFoundError as e:
                 last_err = e
                 continue
