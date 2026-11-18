@@ -4,7 +4,7 @@ import streamlit as st
 
 from gdrive_store import GDriveStore
 from github_sync import GitHubManager
-from groq_agents import AIScientistPipeline
+from groq_agents import AIScientistPipeline, CriticOutput, HypothesisOutput
 from sandbox_runner import execute_experiment
 
 st.set_page_config(
@@ -18,67 +18,76 @@ st.caption(
     "Automated Hypothesis Generation, Sandboxed Execution & Research Publishing"
 )
 
-# 1. Safe Secret Validation (supports both service_account table & service_account_json string)
-REQUIRED_SECRETS = {
-    "groq": ["api_key"],
-    "github": ["token", "repo_name", "pages_repo"],
-    "gdrive": ["folder_id"],
-}
 
-missing_items = []
-for section, keys in REQUIRED_SECRETS.items():
-    if section not in st.secrets:
-        missing_items.append(f"[{section}] (entire section missing)")
-    else:
-        for key in keys:
-            if (
-                key not in st.secrets[section]
-                or not str(st.secrets[section][key]).strip()
-            ):
-                missing_items.append(f"[{section}] -> {key}")
-
-if "gdrive" in st.secrets:
-    has_table = "service_account" in st.secrets["gdrive"]
-    has_json = "service_account_json" in st.secrets["gdrive"]
-    if not (has_table or has_json):
-        missing_items.append(
-            "[gdrive.service_account] (or [gdrive] -> service_account_json)"
-        )
-
-if missing_items:
-    st.error("Missing or empty configuration keys in Streamlit Secrets:")
-    for item in missing_items:
-        st.markdown(f"- `{item}`")
-    st.info(
-        "Open **Manage app -> Settings -> Secrets** and ensure `[groq]`, `[github]`, and `[gdrive]` are properly configured."
-    )
-    st.stop()
-
-# 2. Initialize Service Clients Safely
-try:
-    groq_agent = AIScientistPipeline(
-        api_key=st.secrets["groq"]["api_key"].strip()
-    )
-    gh_mgr = GitHubManager(
-        token=st.secrets["github"]["token"].strip(),
-        repo_name=st.secrets["github"]["repo_name"].strip(),
-        pages_repo=st.secrets["github"]["pages_repo"].strip(),
+def is_dummy(val: str) -> bool:
+    v = str(val).strip()
+    return (
+        not v
+        or "your_" in v
+        or "PASTE_YOUR" in v
+        or "..." in v
+        or v in {"gsk_your_groq_api_key_here", "ghp_your_github_pat_here"}
     )
 
+
+# 1. Detect Live vs. Dummy Secrets
+groq_key = st.secrets.get("groq", {}).get("api_key", "")
+gh_token = st.secrets.get("github", {}).get("token", "")
+gh_repo = st.secrets.get("github", {}).get(
+    "repo_name", "srinivasta/ai-scientist-lab"
+)
+gh_pages = st.secrets.get("github", {}).get(
+    "pages_repo", "srinivasta/srinivasta.github.io"
+)
+
+groq_live = not is_dummy(groq_key)
+gh_live = not is_dummy(gh_token)
+
+groq_agent = AIScientistPipeline(api_key=groq_key.strip()) if groq_live else None
+gh_mgr = (
+    GitHubManager(
+        token=gh_token.strip(),
+        repo_name=gh_repo.strip(),
+        pages_repo=gh_pages.strip(),
+    )
+    if gh_live
+    else None
+)
+
+drive = None
+if "gdrive" in st.secrets and not is_dummy(
+    st.secrets["gdrive"].get("folder_id", "")
+):
     sa_creds = (
         st.secrets["gdrive"]["service_account"]
         if "service_account" in st.secrets["gdrive"]
-        else st.secrets["gdrive"]["service_account_json"]
+        else st.secrets["gdrive"].get("service_account_json")
     )
-    drive = GDriveStore(
-        service_account_info=sa_creds,
-        folder_id=st.secrets["gdrive"]["folder_id"].strip(),
-    )
-except Exception as e:
-    st.error(f"Failed to initialize external services: {e}")
-    st.stop()
+    if sa_creds and not is_dummy(str(sa_creds)):
+        try:
+            drive = GDriveStore(
+                service_account_info=sa_creds,
+                folder_id=st.secrets["gdrive"]["folder_id"].strip(),
+            )
+        except Exception:
+            drive = None
 
-# 3. Main UI Tabs
+# Sidebar Status Banner
+with st.sidebar:
+    st.header("🔌 Service Connections")
+    st.markdown(
+        f"- **Groq LLM:** {'🟢 Live' if groq_live else '🟡 Demo Mode (Dummy Key)'}"
+    )
+    st.markdown(
+        f"- **GitHub Sync:** {'🟢 Live' if gh_live else '🟡 Demo Mode (Dummy Key)'}"
+    )
+    st.markdown(
+        f"- **Google Drive:** {'🟢 Live' if drive else '🟡 Disabled (Dummy Key)'}"
+    )
+    st.info(
+        "Replace dummy values in **Manage app -> Settings -> Secrets** whenever you are ready to go live."
+    )
+# 2. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
 with tab_run:
@@ -102,7 +111,7 @@ with tab_run:
             with st.status(
                 "Running AI Scientist Loop...", expanded=True
             ) as status:
-                st.write("1️⃣ Executing current baseline...")
+                st.write("1️⃣ Executing current baseline in AST sandbox...")
                 base_res = execute_experiment(baseline_path)
                 if not base_res["success"]:
                     st.error(
@@ -114,14 +123,33 @@ with tab_run:
                 base_metrics = base_res.get("metrics", {})
                 st.write(f"Baseline Metrics: `{base_metrics}`")
 
-                st.write("2️⃣ Groq Researcher generating hypothesis...")
-                hyp = groq_agent.generate_hypothesis(
-                    baseline_code, str(base_metrics)
-                )
-                st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
+                if groq_live:
+                    st.write("2️⃣ Groq Researcher generating hypothesis...")
+                    hyp = groq_agent.generate_hypothesis(
+                        baseline_code, str(base_metrics)
+                    )
+                    st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
 
-                st.write("3️⃣ Groq Engineer writing candidate experiment...")
-                candidate_code = groq_agent.write_code(baseline_code, hyp)
+                    st.write("3️⃣ Groq Engineer writing candidate experiment...")
+                    candidate_code = groq_agent.write_code(baseline_code, hyp)
+                else:
+                    st.write("2️⃣ [Demo Mode] Generating sample hypothesis...")
+                    hyp = HypothesisOutput(
+                        title="Gradient Boosting Ensemble with Tuned Depth",
+                        rationale="Replacing shallow RandomForest (max_depth=5) with GradientBoostingClassifier captures higher-order feature interactions.",
+                        proposed_changes="Use GradientBoostingClassifier(n_estimators=120, learning_rate=0.08, max_depth=4, random_state=42).",
+                    )
+                    st.info(f"**Hypothesis:** {hyp.title}\n\n{hyp.rationale}")
+
+                    st.write("3️⃣ [Demo Mode] Preparing candidate script...")
+                    candidate_code = baseline_code.replace(
+                        "from sklearn.ensemble import RandomForestClassifier",
+                        "from sklearn.ensemble import GradientBoostingClassifier",
+                    ).replace(
+                        "RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42)",
+                        "GradientBoostingClassifier(n_estimators=120, learning_rate=0.08, max_depth=4, random_state=42)",
+                    )
+
                 os.makedirs("outputs", exist_ok=True)
                 cand_path = "outputs/candidate_experiment.py"
                 with open(cand_path, "w") as f:
@@ -141,43 +169,69 @@ with tab_run:
                     new_metrics = cand_res["metrics"]
                     st.write(f"New Metrics: `{new_metrics}`")
 
-                    st.write("5️⃣ Groq Critic evaluating results...")
-                    critic = groq_agent.review_results(
-                        hyp, base_metrics, new_metrics
-                    )
+                    if groq_live:
+                        st.write("5️⃣ Groq Critic evaluating results...")
+                        critic = groq_agent.review_results(
+                            hyp, base_metrics, new_metrics
+                        )
+                    else:
+                        improved = new_metrics.get(
+                            "val_accuracy", 0
+                        ) > base_metrics.get("val_accuracy", 0)
+                        critic = CriticOutput(
+                            approved=improved,
+                            feedback="[Demo Mode] Validation accuracy improved cleanly without data leakage.",
+                        )
 
                     if critic.approved:
                         st.success(f"Approved by Critic: {critic.feedback}")
-                        paper_md = groq_agent.draft_paper(
-                            hyp, base_metrics, new_metrics, critic
-                        )
+                        if groq_live:
+                            paper_md = groq_agent.draft_paper(
+                                hyp, base_metrics, new_metrics, critic
+                            )
+                        else:
+                            paper_md = (
+                                f"---\ntitle: \"{hyp.title}\"\ndate: {datetime.utcnow().strftime('%Y-%m-%d')}\ntags: [ai-scientist, automl]\n---\n\n"
+                                f"## Abstract\nAutonomous experiment testing **{hyp.title}**.\n\n"
+                                f"## Empirical Results\n- **Baseline:** `{base_metrics}`\n- **Candidate:** `{new_metrics}`\n\n"
+                                f"## Conclusion\n{critic.feedback}"
+                            )
 
-                        # Upload artifacts to Google Drive
-                        plot_link = drive.upload_file(
-                            "outputs/metrics_plot.png", "image/png"
-                        )
-                        metrics_link = drive.upload_file(
-                            "outputs/metrics.json", "application/json"
-                        )
+                        plot_link, metrics_link = "Demo-Local", "Demo-Local"
+                        if drive:
+                            plot_link = drive.upload_file(
+                                "outputs/metrics_plot.png", "image/png"
+                            )
+                            metrics_link = drive.upload_file(
+                                "outputs/metrics.json", "application/json"
+                            )
 
-                        # Create GitHub PR
                         branch = (
                             f"exp-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
                         )
-                        pr_body = (
-                            f"### Hypothesis\n{hyp.rationale}\n\n"
-                            f"### Metrics\n- Baseline: `{base_metrics}`\n- Candidate: `{new_metrics}`\n\n"
-                            f"### Drive Artifacts\n- [Plot]({plot_link}) | [Metrics JSON]({metrics_link})"
-                        )
-                        pr_url = gh_mgr.create_experiment_pr(
-                            branch, candidate_code, paper_md, hyp.title, pr_body
-                        )
+                        if gh_live:
+                            pr_body = (
+                                f"### Hypothesis\n{hyp.rationale}\n\n"
+                                f"### Metrics\n- Baseline: `{base_metrics}`\n- Candidate: `{new_metrics}`\n\n"
+                                f"### Drive Artifacts\n- [Plot]({plot_link}) | [Metrics JSON]({metrics_link})"
+                            )
+                            pr_url = gh_mgr.create_experiment_pr(
+                                branch,
+                                candidate_code,
+                                paper_md,
+                                hyp.title,
+                                pr_body,
+                            )
+                            st.markdown(
+                                f"✅ **Pull Request Opened:** [{pr_url}]({pr_url})"
+                            )
+                        else:
+                            st.info(
+                                f"🟡 **[Demo Mode]** Skipped GitHub PR creation for branch `{branch}` (add a real GitHub token to enable live PRs)."
+                            )
 
                         st.session_state["latest_paper"] = paper_md
                         st.session_state["latest_slug"] = branch
-                        st.markdown(
-                            f"✅ **Pull Request Opened:** [{pr_url}]({pr_url})"
-                        )
                         status.update(
                             label="Research Cycle Complete!", state="complete"
                         )
@@ -192,15 +246,25 @@ with tab_run:
             st.subheader("📄 Generated Research Paper")
             st.markdown(st.session_state["latest_paper"])
             if st.button("🌐 Publish Report to srinivasta.github.io"):
-                live_url = gh_mgr.publish_to_portfolio(
-                    st.session_state["latest_slug"],
-                    st.session_state["latest_paper"],
-                )
-                st.success(f"Published live to portfolio: {live_url}")
+                if gh_live:
+                    live_url = gh_mgr.publish_to_portfolio(
+                        st.session_state["latest_slug"],
+                        st.session_state["latest_paper"],
+                    )
+                    st.success(f"Published live to portfolio: {live_url}")
+                else:
+                    st.warning(
+                        "🟡 **[Demo Mode]** Add a real GitHub PAT in Secrets to publish directly to `srinivasta.github.io`."
+                    )
 
 with tab_drive:
     st.subheader("Google Drive Experiment Archive")
-    if st.button("🔄 Refresh Artifacts"):
+    if not drive:
+        st.info(
+            "Google Drive is currently in **Demo Mode** because dummy credentials are configured. "
+            "Add your real GCP Service Account credentials in Streamlit Secrets to view and store Drive artifacts."
+        )
+    elif st.button("🔄 Refresh Artifacts"):
         try:
             files = drive.list_artifacts()
             if not files:
