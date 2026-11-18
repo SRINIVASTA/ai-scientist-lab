@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Union
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -7,14 +8,33 @@ from googleapiclient.http import MediaFileUpload
 
 class GDriveStore:
 
-    def __init__(self, service_account_json_str: str, folder_id: str):
-        creds_dict = json.loads(service_account_json_str, strict=False)
+    def __init__(
+        self,
+        service_account_info: Union[str, dict] = None,
+        folder_id: str = "",
+        service_account_json_str: Union[str, dict] = None,
+    ):
+        raw_creds = (
+            service_account_info
+            if service_account_info is not None
+            else service_account_json_str
+        )
+        if raw_creds is None:
+            raise ValueError("Google Service Account credentials are required.")
 
-        # Fix literal "\n" escaping issues caused by TOML multiline strings
+        if isinstance(raw_creds, str):
+            creds_dict = json.loads(raw_creds, strict=False)
+        else:
+            creds_dict = dict(raw_creds)
+
         if "private_key" in creds_dict:
-            creds_dict["private_key"] = creds_dict["private_key"].replace(
-                "\\n", "\n"
-            )
+            pk = creds_dict["private_key"].replace("\\n", "\n").strip()
+            if "..." in pk or "BEGIN PRIVATE KEY" not in pk:
+                raise ValueError(
+                    "Invalid Google Service Account private_key in Secrets. "
+                    "Ensure you pasted the full private_key from your GCP JSON file, not '...'."
+                )
+            creds_dict["private_key"] = pk
 
         creds = service_account.Credentials.from_service_account_info(
             creds_dict,
