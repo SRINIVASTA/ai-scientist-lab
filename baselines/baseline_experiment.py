@@ -7,6 +7,19 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
 
+def compute_rolling_shannon_entropy(
+    series: pd.Series, window: int = 20, bins: int = 8
+) -> pd.Series:
+    """Computes rolling Shannon Entropy (bits) over binned log returns."""
+
+    def _entropy(arr: np.ndarray) -> float:
+        counts, _ = np.histogram(arr, bins=bins)
+        probs = counts[counts > 0] / len(arr)
+        return float(-np.sum(probs * np.log2(probs)))
+
+    return series.rolling(window).apply(_entropy, raw=True)
+
+
 def load_market_data() -> pd.DataFrame:
     """Loads real yfinance OHLCV data saved at data/market_data.csv."""
     csv_path = "data/market_data.csv"
@@ -27,11 +40,15 @@ def load_market_data() -> pd.DataFrame:
         )
 
     df["ret_1d"] = df["Close"].pct_change(1)
+    df["log_ret"] = np.log(df["Close"] / df["Close"].shift(1))
     df["ret_5d"] = df["Close"].pct_change(5)
     df["ret_20d"] = df["Close"].pct_change(20)
     df["vol_10d"] = df["ret_1d"].rolling(10).std()
     df["sma_ratio"] = df["Close"] / df["Close"].rolling(20).mean() - 1.0
     df["hl_spread"] = (df["High"] - df["Low"]) / df["Close"]
+    df["shannon_entropy_20d"] = compute_rolling_shannon_entropy(
+        df["log_ret"], window=20, bins=8
+    )
 
     # Target: 5-day forward swing direction (1 = Higher in 5 trading days, 0 = Lower)
     df["target"] = (df["Close"].shift(-5) > df["Close"]).astype(int)
@@ -47,6 +64,7 @@ def run_experiment():
         "vol_10d",
         "sma_ratio",
         "hl_spread",
+        "shannon_entropy_20d",
     ]
     X = df[feature_cols]
     y = df["target"]
@@ -70,7 +88,7 @@ def run_experiment():
         ["5D Trend Acc", "F1 Score"], [acc, f1], color=["#1f77b4", "#ff7f0e"]
     )
     plt.ylim(0, 1.0)
-    plt.title("Out-of-Sample 5-Day Swing Direction Metrics")
+    plt.title("Out-of-Sample 5-Day Swing Metrics (With Shannon Entropy)")
     plt.savefig("outputs/metrics_plot.png", bbox_inches="tight")
     plt.close()
 
