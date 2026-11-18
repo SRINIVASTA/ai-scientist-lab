@@ -98,6 +98,7 @@ with st.sidebar:
     st.info(
         "Replace dummy values in **Manage app -> Settings -> Secrets** whenever you are ready to go live."
     )
+
 # 2. Main UI Tabs
 tab_run, tab_drive = st.tabs(["🧪 Experiment Loop", "☁️ Drive Artifacts"])
 
@@ -172,6 +173,8 @@ with tab_run:
                 cand_res = execute_experiment(cand_path)
 
                 if not cand_res["success"]:
+                    st.session_state.pop("latest_paper", None)
+                    st.session_state.pop("latest_slug", None)
                     st.error(
                         f"Sandbox Execution Failed:\n{cand_res['error']}"
                     )
@@ -188,10 +191,15 @@ with tab_run:
                     else:
                         improved = new_metrics.get(
                             "val_accuracy", 0
-                        ) >= base_metrics.get("val_accuracy", 0)
+                        ) > base_metrics.get("val_accuracy", 0)
+                        feedback_msg = (
+                            "[Demo Mode] Out-of-sample directional accuracy improved without lookahead leakage."
+                            if improved
+                            else "[Demo Mode] Candidate model underperformed baseline out-of-sample (likely overfitting noisy returns)."
+                        )
                         critic = CriticOutput(
                             approved=improved,
-                            feedback="[Demo Mode] Out-of-sample directional accuracy held/improved with strict chronological split.",
+                            feedback=feedback_msg,
                         )
 
                     st.session_state["latest_diff"] = generate_unified_diff(
@@ -253,6 +261,8 @@ with tab_run:
                             label="Research Cycle Complete!", state="complete"
                         )
                     else:
+                        st.session_state.pop("latest_paper", None)
+                        st.session_state.pop("latest_slug", None)
                         st.warning(f"Rejected by Critic: {critic.feedback}")
                         status.update(
                             label="Hypothesis Rejected", state="complete"
@@ -261,7 +271,7 @@ with tab_run:
     # Visual Diff & Diagnostic Plot Section
     if "latest_diff" in st.session_state:
         st.divider()
-        vis_col1, vis_col2 = st.columns([3, 2])
+        vis_col1, vis_col2 = st.columns(2)
         with vis_col1:
             st.subheader("🔍 Candidate Code Diff")
             st.code(st.session_state["latest_diff"], language="diff")
