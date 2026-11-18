@@ -115,7 +115,7 @@ with tab_run:
     with st.expander(
         "📈 Configure Market Dataset (Yahoo Finance)", expanded=True
     ):
-        d_col1, d_col2, d_col3 = st.columns()
+        d_col1, d_col2, d_col3 = st.columns(3)
         ticker = d_col1.text_input(
             "Ticker Symbol (e.g., ^NSEI, RELIANCE.NS, TCS.NS, SPY)",
             value="^NSEI",
