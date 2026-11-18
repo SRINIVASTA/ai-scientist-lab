@@ -1,5 +1,5 @@
 import json
-from groq import Groq
+from groq import Groq, NotFoundError
 from pydantic import BaseModel
 
 
@@ -16,23 +16,37 @@ class CriticOutput(BaseModel):
 
 class AIScientistPipeline:
 
-    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "openai/gpt-oss-120b",
+        fallback_models: tuple = ("qwen/qwen3.8-27b", "openai/gpt-oss-20b"),
+    ):
         self.client = Groq(api_key=api_key)
-        self.model = model
+        self.models = (model,) + fallback_models
 
     def _chat(self, system: str, user: str, json_mode: bool = False) -> str:
-        kwargs = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": 0.3,
-        }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        resp = self.client.chat.completions.create(**kwargs)
-        return resp.choices[0].message.content
+        last_err = None
+        for active_model in self.models:
+            try:
+                kwargs = {
+                    "model": active_model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": 0.3,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                resp = self.client.chat.completions.create(**kwargs)
+                return resp.choices[0].message.content
+            except NotFoundError as e:
+                last_err = e
+                continue
+        raise RuntimeError(
+            f"None of the configured Groq models ({self.models}) are accessible: {last_err}"
+        )
 
     def generate_hypothesis(
         self, baseline_code: str, past_results: str
@@ -59,7 +73,11 @@ class AIScientistPipeline:
             "3) Only import os (for os.makedirs), json, matplotlib, numpy, pandas, sklearn. "
             "4) Return ONLY raw valid Python code without markdown fences."
         )
-        user_msg = f"Baseline:\n{baseline_code}\n\nHypothesis: {hypothesis.title}\nChanges: {hypothesis.proposed_changes}"
+        user_msg = (
+            f"Baseline:\n{baseline_code}\n\n"
+            f"Hypothesis: {hypothesis.title}\n"
+            f"Changes: {hypothesis.proposed_changes}"
+        )
         code = self._chat(sys_prompt, user_msg)
         return code.replace("```python", "").replace("```", "").strip()
 
@@ -74,7 +92,11 @@ class AIScientistPipeline:
             "Approve ONLY if val_accuracy strictly improved without data leakage. "
             "Respond strictly in JSON with keys: 'approved' (boolean), 'feedback' (string)."
         )
-        user_msg = f"Hypothesis: {hypothesis.model_dump_json()}\nBaseline: {baseline_metrics}\nNew: {new_metrics}"
+        user_msg = (
+            f"Hypothesis: {hypothesis.model_dump_json()}\n"
+            f"Baseline: {baseline_metrics}\n"
+            f"New: {new_metrics}"
+        )
         raw = self._chat(sys_prompt, user_msg, json_mode=True)
         return CriticOutput(**json.loads(raw))
 
