@@ -8,6 +8,7 @@ def generate_research_pdf(
 ) -> bytes:
     """Converts the Markdown research paper and diagnostic chart into a clean PDF."""
     pdf = FPDF()
+    pdf.set_margins(left=15, top=15, right=15)
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
@@ -18,7 +19,7 @@ def generate_research_pdf(
         0, 10, "Autonomous AI Scientist Lab | Research Report", ln=True
     )
     pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
     pdf.ln(5)
 
     # Strip YAML frontmatter block for cleaner PDF reading
@@ -43,33 +44,43 @@ def generate_research_pdf(
 
     for line in clean_md.splitlines():
         stripped = line.strip()
+        pdf.set_x(pdf.l_margin)
+
         if not stripped:
             pdf.ln(3)
             continue
+
+        # Skip raw markdown table divider lines like |---|---|
+        if re.match(r"^\|?[\s\-:|]+\|?\$", stripped):
+            continue
+
+        clean_line = stripped.replace("**", "")
+
         if stripped.startswith("# "):
             pdf.set_font("Helvetica", "B", 15)
             pdf.set_text_color(15, 35, 75)
-            pdf.multi_cell(0, 8, stripped[2:].replace("**", ""))
+            pdf.multi_cell(pdf.epw, 8, clean_line[2:], wrapmode="CHAR")
             pdf.ln(2)
         elif stripped.startswith("## "):
             pdf.set_font("Helvetica", "B", 12)
             pdf.set_text_color(25, 65, 120)
-            pdf.multi_cell(0, 7, stripped[3:].replace("**", ""))
+            pdf.multi_cell(pdf.epw, 7, clean_line[3:], wrapmode="CHAR")
             pdf.ln(1)
         elif stripped.startswith("### "):
             pdf.set_font("Helvetica", "B", 11)
             pdf.set_text_color(40, 40, 40)
-            pdf.multi_cell(0, 6, stripped[4:].replace("**", ""))
+            pdf.multi_cell(pdf.epw, 6, clean_line[4:], wrapmode="CHAR")
         elif stripped.startswith("```"):
             continue
         else:
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(30, 30, 30)
-            pdf.multi_cell(0, 5.5, stripped.replace("**", ""))
+            pdf.multi_cell(pdf.epw, 5.5, clean_line, wrapmode="CHAR")
 
     # Embed Validation Metrics Chart if available
     if os.path.exists(plot_path):
         pdf.ln(5)
+        pdf.set_x(pdf.l_margin)
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(25, 65, 120)
         pdf.cell(0, 8, "Validation Metrics Diagnostic Plot", ln=True)
